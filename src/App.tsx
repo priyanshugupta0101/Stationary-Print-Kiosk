@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import { Header, AppNavView } from './components/Header';
 import { CustomerUploadView } from './components/CustomerUploadView';
 import { CustomerCodeResult } from './components/CustomerCodeResult';
@@ -735,6 +736,7 @@ export default function App() {
           </div>
         </div>
       )}
+      <Analytics />
     </div>
   );
 }
