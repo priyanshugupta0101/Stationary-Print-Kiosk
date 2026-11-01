@@ -1,0 +1,258 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-slate-750: #24324a;
+  --color-slate-850: #141d2e;
+}
+
+@layer base {
+  :root {
+    --bg-canvas: #F8FAFC;
+    --bg-card: #FFFFFF;
+    --bg-card-subtle: #F1F5F9;
+    --bg-card-elevated: #FFFFFF;
+    --border-card: #E2E8F0;
+    --border-subtle: #EDF2F7;
+    --border-focus: #4F46E5;
+    --primary: #0F172A;
+    --primary-hover: #1E293B;
+    --primary-text: #FFFFFF;
+    --accent: #4F46E5;
+    --accent-hover: #4338CA;
+    --accent-light: #EEF2FF;
+    --accent-border: #C7D2FE;
+    --text-main: #0F172A;
+    --text-body: #334155;
+    --text-sub: #64748B;
+    --text-muted: #94A3B8;
+    --font-heading: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --card-radius: 1.25rem;
+  }
+
+  .dark {
+    --bg-canvas: #090D16;
+    --bg-card: #0F172A;
+    --bg-card-subtle: #162032;
+    --bg-card-elevated: #1E293B;
+    --border-card: #1E293B;
+    --border-subtle: #141D2B;
+    --border-focus: #FACC15;
+    --primary: #F8FAFC;
+    --primary-hover: #E2E8F0;
+    --primary-text: #090D16;
+    --accent: #FACC15;
+    --accent-hover: #EAB308;
+    --accent-light: rgba(250, 204, 21, 0.14);
+    --accent-border: rgba(250, 204, 21, 0.35);
+    --text-main: #F8FAFC;
+    --text-body: #CBD5E1;
+    --text-sub: #94A3B8;
+    --text-muted: #64748B;
+  }
+
+  /* Smooth theme switch animation transitions */
+  html.theme-transition,
+  html.theme-transition *,
+  html.theme-transition *:before,
+  html.theme-transition *:after {
+    transition: background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.35s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    transition-delay: 0s !important;
+  }
+
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    background-color: var(--bg-canvas);
+    color: var(--text-body);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.35s ease, color 0.3s ease;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+    letter-spacing: -0.025em;
+  }
+
+  /* Universal Dark Mode Text Visibility Safeguards:
+     Ensures that text-slate-700/800/900 are automatically brightened
+     when dark mode is active, while preserving explicit white paper mockups */
+  .dark input,
+  .dark select,
+  .dark textarea {
+    color: #F8FAFC;
+  }
+
+  .dark input::placeholder,
+  .dark textarea::placeholder {
+    color: #94A3B8;
+  }
+
+  .dark option {
+    background-color: #0F172A;
+    color: #F8FAFC;
+  }
+}
+
+/* Smooth root view-transition for modern browsers */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.35s;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Premium Luminous Yellow Neon Signature for "COPY" in Dark Mode */
+.dark .brand-neon-glow {
+  color: #FACC15 !important;
+  text-shadow:
+    0 0 6px rgba(254, 240, 138, 0.95),
+    0 0 14px rgba(250, 204, 21, 0.8),
+    0 0 28px rgba(234, 179, 8, 0.55),
+    0 0 42px rgba(202, 138, 4, 0.35) !important;
+  letter-spacing: 0.08em;
+  font-weight: 900;
+  transition: text-shadow 0.3s ease, color 0.3s ease;
+  animation: neon-yellow-soft-glow 3s ease-in-out infinite alternate;
+}
+
+@keyframes neon-yellow-soft-glow {
+  0% {
+    text-shadow:
+      0 0 6px rgba(254, 240, 138, 0.85),
+      0 0 14px rgba(250, 204, 21, 0.7),
+      0 0 24px rgba(234, 179, 8, 0.45);
+  }
+  100% {
+    text-shadow:
+      0 0 8px rgba(255, 255, 255, 0.95),
+      0 0 18px rgba(254, 240, 138, 0.9),
+      0 0 32px rgba(250, 204, 21, 0.8),
+      0 0 48px rgba(234, 179, 8, 0.45);
+  }
+}
+
+.dark .brand-neon-badge {
+  border-color: rgba(250, 204, 21, 0.55) !important;
+  box-shadow: 0 0 16px rgba(250, 204, 21, 0.25), inset 0 0 10px rgba(250, 204, 21, 0.12) !important;
+}
+
+/* Vibrant Animated Multi-Color Banner */
+.vibrant-banner-bg {
+  background: linear-gradient(115deg, #1e1b4b 0%, #312e81 20%, #4338ca 40%, #065f46 65%, #701a75 85%, #1e1b4b 100%);
+  background-size: 250% 250%;
+  animation: banner-mesh-flow 14s ease infinite;
+}
+
+.dark .vibrant-banner-bg {
+  background: linear-gradient(115deg, #090d16 0%, #1e1b4b 25%, #143527 50%, #381237 75%, #090d16 100%);
+  background-size: 250% 250%;
+  animation: banner-mesh-flow 14s ease infinite;
+}
+
+@keyframes banner-mesh-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.animated-gradient-banner {
+  background-size: 200% 100%;
+  animation: gradient-shimmer-run 3.5s linear infinite;
+}
+
+@keyframes gradient-shimmer-run {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+/* Sound Waves Equalizer Animation */
+.sound-bar {
+  display: inline-block;
+  width: 2.5px;
+  background-color: currentColor;
+  border-radius: 9999px;
+  animation: sound-bounce 1s ease-in-out infinite alternate;
+}
+
+.sound-bar-1 { height: 6px; animation-delay: 0.1s; }
+.sound-bar-2 { height: 12px; animation-delay: 0.25s; }
+.sound-bar-3 { height: 8px; animation-delay: 0.4s; }
+.sound-bar-4 { height: 14px; animation-delay: 0.15s; }
+
+@keyframes sound-bounce {
+  0% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+  100% { transform: scaleY(0.45); }
+}
+
+/* Custom modern ticket notch effect */
+.ticket-notch-left {
+  position: relative;
+}
+.ticket-notch-left::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  background-color: var(--bg-canvas);
+  border-radius: 50%;
+  border-right: 1px solid var(--border-card);
+}
+
+.ticket-notch-right {
+  position: relative;
+}
+.ticket-notch-right::after {
+  content: '';
+  position: absolute;
+  right: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  background-color: var(--bg-canvas);
+  border-radius: 50%;
+  border-left: 1px solid var(--border-card);
+}
+
+/* Print Clean Mode */
+@media print {
+  header,
+  footer,
+  button,
+  #theme-switcher-bar,
+  #back-to-upload-btn,
+  #print-customer-slip-btn,
+  #new-document-upload-btn,
+  #copy-otp-btn,
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  .print-clean {
+    border: 1px solid #111 !important;
+    box-shadow: none !important;
+  }
+}

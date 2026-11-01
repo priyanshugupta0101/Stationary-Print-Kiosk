@@ -1,0 +1,30 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    match /shops/{shopId} {
+      allow get: if isValidId(shopId);
+      allow list: if true;
+      allow create, update, delete: if isValidId(shopId);
+    }
+
+    match /print_jobs/{jobId} {
+      allow get: if isValidId(jobId);
+      allow list: if true;
+      allow create, update, delete: if isValidId(jobId);
+    }
+
+    match /super_admin_config/{configId} {
+      allow get: if isValidId(configId);
+      allow list: if true;
+      allow create, update, delete: if isValidId(configId);
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

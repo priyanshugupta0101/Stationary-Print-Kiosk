@@ -1,0 +1,77 @@
+{
+  "entities": {
+    "Shop": {
+      "title": "Shop",
+      "description": "Multi-tenant print shop and xerox counter tenant entity",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "slug": { "type": "string" },
+        "name": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "tagline": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "whatsappNumber": { "type": "string" },
+        "address": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "trial", "suspended"] },
+        "plan": { "type": "string", "enum": ["free_trial", "starter", "pro", "enterprise"] },
+        "isTrial": { "type": "boolean" },
+        "trialStartDate": { "type": "string" },
+        "trialDurationDays": { "type": "number" },
+        "trialEndsAt": { "type": "string" },
+        "isTrialExpired": { "type": "boolean" },
+        "daysLeftInTrial": { "type": "number" },
+        "hoursLeftInTrial": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "lastActiveAt": { "type": "string" },
+        "totalJobsCount": { "type": "number" },
+        "totalRevenue": { "type": "number" }
+      },
+      "required": ["id", "slug", "name", "status"]
+    },
+    "PrintJob": {
+      "title": "PrintJob",
+      "description": "Print order entity submitted by customer or demo generator",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "otp": { "type": "string" },
+        "shopId": { "type": "string" },
+        "shopSlug": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "received", "printed", "collected", "cancelled"] },
+        "paymentStatus": { "type": "string", "enum": ["unpaid", "paid"] },
+        "paymentMethod": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "printedAt": { "type": "string" }
+      },
+      "required": ["id", "otp", "status", "paymentStatus"]
+    },
+    "SuperAdminConfig": {
+      "title": "SuperAdminConfig",
+      "description": "Global super admin platform configuration and contact details",
+      "type": "object",
+      "properties": {
+        "pin": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/shops/{shopId}": {
+      "schema": { "$ref": "#/entities/Shop" },
+      "description": "Collection of all registered print shops and counters"
+    },
+    "/print_jobs/{jobId}": {
+      "schema": { "$ref": "#/entities/PrintJob" },
+      "description": "Collection of all customer print orders and pickup OTPs"
+    },
+    "/super_admin_config/{configId}": {
+      "schema": { "$ref": "#/entities/SuperAdminConfig" },
+      "description": "Platform admin settings and master credentials"
+    }
+  }
+}
