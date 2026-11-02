@@ -181,7 +181,7 @@ export async function listCloudPrintJobs(
 // 7. Update Job Status / Payment Status in Firestore
 export async function updateCloudPrintJobStatus(
   jobId: string,
-  updates: { status?: string; paymentStatus?: string; notes?: string }
+  updates: { status?: string; paymentStatus?: string; notes?: string; paymentMethod?: string }
 ): Promise<CloudPrintJob | null> {
   try {
     const updated = await updatePersistentJobStatus(jobId, updates);

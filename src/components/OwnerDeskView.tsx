@@ -43,6 +43,7 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
   const [otpInput, setOtpInput] = useState('');
   const [activeJob, setActiveJob] = useState<PrintJob | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isFulfilling, setIsFulfilling] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
@@ -248,6 +249,68 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
       }
     } catch (err: any) {
       setErrorMsg('Failed to update payment: ' + err.message);
+    }
+  };
+
+  // Dedicated atomic handler for Mark as Printed
+  const handleMarkAsPrinted = async () => {
+    if (!activeJob) return;
+    setIsFulfilling(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch(`/api/jobs/${activeJob.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'printed' }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.job) {
+        soundEffects.playStatusChange('printed');
+        setActiveJob(data.job);
+        fetchQueue();
+        setActionSuccess(`✓ Order OTP ${data.job.otp} marked as PRINTED!`);
+        setTimeout(() => setActionSuccess(null), 3500);
+      } else {
+        throw new Error(data?.error || 'Failed to update job status');
+      }
+    } catch (err: any) {
+      setErrorMsg('Could not mark as printed: ' + err.message);
+    } finally {
+      setIsFulfilling(false);
+    }
+  };
+
+  // Dedicated atomic handler for Complete & Deliver
+  const handleCompleteAndDeliver = async () => {
+    if (!activeJob) return;
+    setIsFulfilling(true);
+    setErrorMsg(null);
+    try {
+      const isAlreadyPaid = activeJob.paymentStatus === 'paid';
+      const res = await fetch(`/api/jobs/${activeJob.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'collected',
+          paymentStatus: 'paid',
+          paymentMethod: isAlreadyPaid ? (activeJob.paymentMethod || 'online_gpay') : 'counter',
+          notes: activeJob.notes || 'Completed, paid and delivered to customer at counter desk',
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.job) {
+        soundEffects.playPaymentSuccess();
+        setActiveJob(data.job);
+        fetchQueue();
+        setActionSuccess(`🎉 Order OTP ${data.job.otp} COMPLETED & DELIVERED!`);
+        setTimeout(() => setActionSuccess(null), 4000);
+      } else {
+        throw new Error(data?.error || 'Failed to complete order');
+      }
+    } catch (err: any) {
+      setErrorMsg('Could not deliver order: ' + err.message);
+    } finally {
+      setIsFulfilling(false);
     }
   };
 
@@ -826,25 +889,34 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
             <div className="flex flex-col xs:flex-row items-stretch xs:items-center gap-2">
               <button
                 type="button"
-                onClick={() => updateJobStatus(activeJob.id, 'printed')}
-                className="px-4 py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer"
+                onClick={handleMarkAsPrinted}
+                disabled={isFulfilling || activeJob.status === 'printed' || activeJob.status === 'collected'}
+                className="px-4 py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50 text-indigo-700 dark:bg-yellow-950/40 dark:text-yellow-300 dark:border-yellow-800/80 border border-indigo-200 text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs"
               >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Mark as Printed</span>
+                <CheckCircle2 className={`w-4 h-4 ${isFulfilling ? 'animate-spin' : ''}`} />
+                <span>
+                  {isFulfilling
+                    ? 'Updating...'
+                    : activeJob.status === 'printed'
+                    ? 'Printed ✓'
+                    : 'Mark as Printed'}
+                </span>
               </button>
 
               <button
                 type="button"
-                onClick={() => {
-                  updateJobStatus(activeJob.id, 'collected');
-                  if (activeJob.paymentStatus === 'unpaid') {
-                    togglePayment(activeJob.id, 'unpaid');
-                  }
-                }}
-                className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-md shadow-slate-950/20 transition-all flex items-center justify-center space-x-1.5 cursor-pointer"
+                onClick={handleCompleteAndDeliver}
+                disabled={isFulfilling || activeJob.status === 'collected'}
+                className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold shadow-md shadow-emerald-950/20 transition-all flex items-center justify-center space-x-1.5 cursor-pointer"
               >
-                <Sparkles className="w-4 h-4 text-indigo-300" />
-                <span>Complete &amp; Deliver</span>
+                <Sparkles className={`w-4 h-4 text-emerald-200 ${isFulfilling ? 'animate-pulse' : ''}`} />
+                <span>
+                  {isFulfilling
+                    ? 'Delivering...'
+                    : activeJob.status === 'collected'
+                    ? 'Delivered & Complete ✓'
+                    : 'Complete & Deliver'}
+                </span>
               </button>
             </div>
 

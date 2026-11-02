@@ -34,6 +34,9 @@ import {
   Calendar,
   RotateCcw,
   Database,
+  PhoneCall,
+  Mail,
+  Headphones,
 } from 'lucide-react';
 import { ShopTenant, SuperAdminStats } from '../../types';
 import { CounterStandeeModal } from './CounterStandeeModal';
@@ -50,7 +53,7 @@ interface SuperAdminViewProps {
   initialAuthenticated?: boolean;
 }
 
-export type SuperAdminTab = 'shops' | 'generate' | 'standee' | 'demo' | 'analytics' | 'demo_sandbox';
+export type SuperAdminTab = 'shops' | 'generate' | 'standee' | 'demo' | 'analytics' | 'demo_sandbox' | 'helpline';
 
 export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
   onNavigateToCustomer,
@@ -110,6 +113,17 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
   const [notification, setNotification] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  // Platform Provider Helpline & Support Details
+  const [contactData, setContactData] = useState({
+    name: 'Priyanshu Gupta',
+    phone: '+91 98765 00111',
+    email: 'guptapriyanshu0101@gmail.com',
+    whatsappNumber: '+91 98765 00111',
+    serviceProviderTitle: 'Platform Service Provider & Super Admin',
+    customNote: 'Please contact the service provider to renew your shop subscription, extend your free trial, or reactivate your kiosk services.',
+  });
+  const [savingContact, setSavingContact] = useState(false);
+
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
 
   const showToast = (msg: string) => {
@@ -127,10 +141,57 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
     }
   };
 
+  const loadContactData = async () => {
+    try {
+      const res = await fetch('/api/super-admin/contact');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.contact) {
+          setContactData({
+            name: data.contact.name || '',
+            phone: data.contact.phone || '',
+            email: data.contact.email || '',
+            whatsappNumber: data.contact.whatsappNumber || '',
+            serviceProviderTitle: data.contact.serviceProviderTitle || 'Platform Service Provider & Super Admin',
+            customNote: data.contact.customNote || '',
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load contact data:', e);
+    }
+  };
+
+  const handleSaveContact = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingContact(true);
+    try {
+      const res = await fetch('/api/super-admin/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pin: '145214',
+          ...contactData,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('Helpline & Service Provider support details updated and saved successfully!');
+      } else {
+        showToast(data.error || 'Failed to save contact details');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error saving contact details');
+    } finally {
+      setSavingContact(false);
+    }
+  };
+
   useEffect(() => {
     if (isAuthenticated) {
       loadShops();
       loadStats();
+      loadContactData();
     }
   }, [isAuthenticated]);
 
@@ -681,6 +742,23 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
             </span>
           )}
         </button>
+
+        {/* Helpline & Support Desk Tab */}
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('helpline');
+            loadContactData();
+          }}
+          className={`flex items-center space-x-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
+            activeTab === 'helpline'
+              ? 'bg-slate-950 dark:bg-yellow-400 text-white dark:text-slate-950 shadow-sm'
+              : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
+          }`}
+        >
+          <Headphones className="w-4 h-4 text-sky-500" />
+          <span>Helpline & Support Desk</span>
+        </button>
       </div>
 
       {/* Demo Mode Active Notification Banner */}
@@ -1179,6 +1257,229 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
           onLaunchOwnerView={(slug) => onNavigateToOwner(slug)}
           onExitDemoMode={() => handleToggleDemoMode(false)}
         />
+      )}
+
+      {/* TAB 5: HELPLINE & SERVICE PROVIDER SUPPORT MANAGEMENT */}
+      {activeTab === 'helpline' && (
+        <div className="space-y-6">
+          {/* Header Card */}
+          <div className="bg-gradient-to-r from-slate-900 to-indigo-950 p-6 rounded-3xl border border-indigo-500/30 text-white shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start space-x-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-indigo-500/20 border border-indigo-400/40 flex items-center justify-center shrink-0">
+                  <Headphones className="w-6 h-6 text-sky-300" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+                    <span>Service Provider Helpline & Support Desk</span>
+                    <span className="text-[10px] bg-sky-500/20 border border-sky-400/40 text-sky-200 px-2 py-0.5 rounded-full font-mono uppercase">
+                      Live Broadcast
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-300 mt-1 max-w-2xl">
+                    Configure your official helpline contact information. Whenever you disable or suspend a store, or when an owner's 4-day or 7-day free plan ends, these details are dynamically shown on their screen with one-tap Call, WhatsApp, and Email buttons.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={loadContactData}
+                className="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5 self-start sm:self-center"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Reload</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Contact Form */}
+            <form onSubmit={handleSaveContact} className="lg:col-span-7 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                  <span>Helpline Credentials & Details</span>
+                </h4>
+                <span className="text-[11px] text-slate-400">Authenticated as Super Admin</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Service Provider / Admin Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={contactData.name}
+                  onChange={(e) => setContactData({ ...contactData, name: e.target.value })}
+                  placeholder="e.g. Priyanshu Gupta"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Official Title / Designation
+                </label>
+                <input
+                  type="text"
+                  value={contactData.serviceProviderTitle}
+                  onChange={(e) => setContactData({ ...contactData, serviceProviderTitle: e.target.value })}
+                  placeholder="e.g. Platform Service Provider & Super Admin"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Phone / Helpline Number *
+                  </label>
+                  <div className="relative">
+                    <PhoneCall className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      required
+                      value={contactData.phone}
+                      onChange={(e) => setContactData({ ...contactData, phone: e.target.value })}
+                      placeholder="+91 98765 00111"
+                      className="w-full pl-9 pr-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    WhatsApp Number (with country code) *
+                  </label>
+                  <div className="relative">
+                    <MessageCircle className="w-4 h-4 text-emerald-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      required
+                      value={contactData.whatsappNumber}
+                      onChange={(e) => setContactData({ ...contactData, whatsappNumber: e.target.value })}
+                      placeholder="+91 98765 00111"
+                      className="w-full pl-9 pr-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Support Email Address *
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="email"
+                    required
+                    value={contactData.email}
+                    onChange={(e) => setContactData({ ...contactData, email: e.target.value })}
+                    placeholder="guptapriyanshu0101@gmail.com"
+                    className="w-full pl-9 pr-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Custom Notice / Guidance for Suspended Stores
+                </label>
+                <textarea
+                  rows={3}
+                  value={contactData.customNote}
+                  onChange={(e) => setContactData({ ...contactData, customNote: e.target.value })}
+                  placeholder="Explain instructions to the store owner on how to reactivate or upgrade..."
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-between">
+                <p className="text-[11px] text-slate-400">
+                  Updates take effect instantly in Firestore and disk cache.
+                </p>
+                <button
+                  type="submit"
+                  disabled={savingContact}
+                  className="px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-black rounded-xl shadow-md transition cursor-pointer flex items-center space-x-2 disabled:opacity-50"
+                >
+                  {savingContact ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300" />
+                      <span>Save Helpline Details</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+
+            {/* Live Preview Card */}
+            <div className="lg:col-span-5 space-y-4">
+              <div className="bg-slate-50 dark:bg-slate-800/60 p-5 rounded-3xl border border-slate-200 dark:border-slate-700">
+                <div className="flex items-center space-x-2 text-xs font-black text-slate-900 dark:text-white mb-3">
+                  <Sparkles className="w-4 h-4 text-amber-500" />
+                  <span>Store Owner Screen Preview</span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-4">
+                  This is exactly how disabled or trial-ended store owners will view your contact information:
+                </p>
+
+                <div className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-black text-slate-900 dark:text-white">
+                        {contactData.name || 'Platform Service Provider'}
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        {contactData.serviceProviderTitle || 'Super Admin'}
+                      </p>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">
+                      Official Support
+                    </span>
+                  </div>
+
+                  <div className="space-y-2 text-xs">
+                    <div className="flex items-center space-x-2 text-slate-700 dark:text-slate-300">
+                      <PhoneCall className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                      <span className="font-semibold">{contactData.phone || '+91 98765 00111'}</span>
+                    </div>
+                    <div className="flex items-center space-x-2 text-slate-700 dark:text-slate-300">
+                      <MessageCircle className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                      <span className="font-semibold">{contactData.whatsappNumber || '+91 98765 00111'}</span>
+                    </div>
+                    <div className="flex items-center space-x-2 text-slate-700 dark:text-slate-300 truncate">
+                      <Mail className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                      <span className="font-semibold truncate">{contactData.email || 'support@copyprint.in'}</span>
+                    </div>
+                  </div>
+
+                  {contactData.customNote && (
+                    <div className="p-2.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl text-[11px] text-amber-800 dark:text-amber-300">
+                      {contactData.customNote}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                    <div className="py-2 bg-emerald-600 text-white text-[11px] font-bold rounded-xl text-center shadow-xs">
+                      WhatsApp Provider
+                    </div>
+                    <div className="py-2 bg-indigo-600 text-white text-[11px] font-bold rounded-xl text-center shadow-xs">
+                      Call Provider
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Counter Standee Modal */}

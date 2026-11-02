@@ -117,38 +117,73 @@ export const ServiceSuspendedView: React.FC<ServiceSuspendedViewProps> = ({
           {/* Resolution Guidance */}
           <div className="space-y-3">
             <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider">
-              How to reactivate your shop system
+              Contact Service Provider to Reactivate
             </h4>
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              To restore service, resolve subscription status, or clear compliance holds, please reach out to the Super Admin platform team directly:
+              To restore service, verify compliance, or renew your subscription, please contact the platform service provider directly:
             </p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-              <a
-                href="tel:+919876543210"
-                className="flex items-center space-x-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 transition-colors text-slate-800 dark:text-slate-200"
-              >
-                <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-yellow-400 flex items-center justify-center shrink-0">
-                  <PhoneCall className="w-4 h-4" />
+            {/* Service Provider Profile Card */}
+            <div className="p-4 rounded-2xl bg-indigo-50/70 dark:bg-slate-800/80 border border-indigo-200 dark:border-slate-700 space-y-3">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-600 dark:bg-yellow-400 text-white dark:text-slate-950 font-black text-sm flex items-center justify-center shrink-0 shadow-xs">
+                  {(shopSettings?.contactAdmin?.name || 'P')[0]}
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-500 dark:text-slate-400 block uppercase font-bold">Admin Helpline</span>
-                  <span className="font-bold font-mono">+91 98765 43210</span>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-700 dark:text-yellow-400 block">
+                    {shopSettings?.contactAdmin?.serviceProviderTitle || 'Platform Service Provider'}
+                  </span>
+                  <span className="text-sm font-black text-slate-900 dark:text-slate-100 block">
+                    {shopSettings?.contactAdmin?.name || 'Platform Administrator'}
+                  </span>
                 </div>
-              </a>
+              </div>
 
-              <a
-                href="mailto:support@printportal.in"
-                className="flex items-center space-x-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 transition-colors text-slate-800 dark:text-slate-200"
-              >
-                <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 flex items-center justify-center shrink-0">
-                  <Mail className="w-4 h-4" />
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-500 dark:text-slate-400 block uppercase font-bold">Admin Support</span>
-                  <span className="font-bold">support@printportal.in</span>
-                </div>
-              </a>
+              {shopSettings?.contactAdmin?.customNote && (
+                <p className="text-xs text-slate-600 dark:text-slate-300 italic border-l-2 border-indigo-500 pl-2 py-0.5">
+                  &ldquo;{shopSettings.contactAdmin.customNote}&rdquo;
+                </p>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-indigo-100 dark:border-slate-700 text-xs">
+                {/* Phone */}
+                <a
+                  href={`tel:${(shopSettings?.contactAdmin?.phone || '+919876500111').replace(/\s+/g, '')}`}
+                  className="flex items-center space-x-2 p-2.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-indigo-50 dark:hover:bg-slate-800 border border-indigo-200/80 dark:border-slate-700 transition-colors text-slate-900 dark:text-slate-100"
+                >
+                  <PhoneCall className="w-4 h-4 text-indigo-600 dark:text-yellow-400 shrink-0" />
+                  <div className="min-w-0">
+                    <span className="text-[9px] text-slate-500 dark:text-slate-400 block font-bold uppercase">Call Admin</span>
+                    <span className="font-bold font-mono text-[11px] truncate block">{shopSettings?.contactAdmin?.phone || '+91 98765 00111'}</span>
+                  </div>
+                </a>
+
+                {/* WhatsApp */}
+                <a
+                  href={`https://wa.me/${(shopSettings?.contactAdmin?.whatsappNumber || '919876500111').replace(/\D/g, '')}?text=${encodeURIComponent(`Hello! My store "${shopName}" (${shopSlug}) is suspended on COPY Kiosk. Please assist with reactivation.`)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center space-x-2 p-2.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-emerald-50 dark:hover:bg-slate-800 border border-emerald-200/80 dark:border-slate-700 transition-colors text-slate-900 dark:text-slate-100"
+                >
+                  <ExternalLink className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <div className="min-w-0">
+                    <span className="text-[9px] text-emerald-700 dark:text-emerald-400 block font-bold uppercase">WhatsApp</span>
+                    <span className="font-bold text-[11px] text-emerald-700 dark:text-emerald-400 truncate block">Chat Support</span>
+                  </div>
+                </a>
+
+                {/* Email */}
+                <a
+                  href={`mailto:${shopSettings?.contactAdmin?.email || 'guptapriyanshu0101@gmail.com'}?subject=${encodeURIComponent(`Store Reactivation Request: ${shopName} (${shopSlug})`)}`}
+                  className="flex items-center space-x-2 p-2.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-purple-50 dark:hover:bg-slate-800 border border-purple-200/80 dark:border-slate-700 transition-colors text-slate-900 dark:text-slate-100"
+                >
+                  <Mail className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
+                  <div className="min-w-0">
+                    <span className="text-[9px] text-slate-500 dark:text-slate-400 block font-bold uppercase">Email</span>
+                    <span className="font-bold text-[11px] truncate block">{shopSettings?.contactAdmin?.email || 'guptapriyanshu0101@gmail.com'}</span>
+                  </div>
+                </a>
+              </div>
             </div>
           </div>
 
@@ -159,7 +194,7 @@ export const ServiceSuspendedView: React.FC<ServiceSuspendedViewProps> = ({
             </div>
           )}
 
-          {/* Actions */}
+          {/* Actions (NO Super Admin Hub link visible) */}
           <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
             <button
               type="button"
@@ -171,28 +206,14 @@ export const ServiceSuspendedView: React.FC<ServiceSuspendedViewProps> = ({
               <span>{refreshing ? 'Checking with Server...' : 'Check If Service Restored'}</span>
             </button>
 
-            <div className="flex items-center space-x-2 w-full sm:w-auto justify-end">
-              <button
-                type="button"
-                onClick={onBackToCustomer}
-                className="flex-1 sm:flex-none flex items-center justify-center space-x-1.5 px-3 py-2.5 text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" />
-                <span>Customer Counter</span>
-              </button>
-
-              {onOpenSuperAdmin && (
-                <button
-                  type="button"
-                  onClick={onOpenSuperAdmin}
-                  className="flex-1 sm:flex-none flex items-center justify-center space-x-1 px-3 py-2.5 text-xs font-bold text-indigo-600 dark:text-yellow-400 hover:text-indigo-800 dark:hover:text-yellow-300 hover:bg-indigo-50 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-                  title="Super Admin Master Portal"
-                >
-                  <Lock className="w-3.5 h-3.5" />
-                  <span>Super Admin Hub</span>
-                </button>
-              )}
-            </div>
+            <button
+              type="button"
+              onClick={onBackToCustomer}
+              className="w-full sm:w-auto flex items-center justify-center space-x-1.5 px-3.5 py-2.5 text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Customer Counter</span>
+            </button>
           </div>
         </div>
       </div>

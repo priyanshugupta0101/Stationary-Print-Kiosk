@@ -134,9 +134,6 @@ export default function App() {
           data.shopName = 'COPY';
         }
         setShopSettings(data);
-        if (data.shopSlug && !targetSlug) {
-          setActiveShopSlug(data.shopSlug);
-        }
         try {
           localStorage.setItem(`copy_print_shop_settings_${targetSlug || 'default'}`, JSON.stringify(data));
         } catch (e) {}
@@ -501,7 +498,6 @@ export default function App() {
               setCurrentView('upload');
               setCustomerStage('upload');
             }}
-            onOpenSuperAdmin={() => setCurrentView('super-admin')}
           />
         ) : currentView === 'owner' && (shopSettings?.status === 'suspended' || shopSettings?.isSuspended) ? (
           <ServiceSuspendedView
@@ -512,7 +508,6 @@ export default function App() {
               setCurrentView('upload');
               setCustomerStage('upload');
             }}
-            onOpenSuperAdmin={() => setCurrentView('super-admin')}
           />
         ) : (
           /* Owner Portal: Distinct Pages for Each Task */

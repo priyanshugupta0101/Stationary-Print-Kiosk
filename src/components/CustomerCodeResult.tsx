@@ -55,6 +55,7 @@ export const CustomerCodeResult: React.FC<CustomerCodeResultProps> = ({
 
   const shopName = shopSettings?.shopName || 'COPY';
   const upiId = (shopSettings?.upiId || '').trim();
+  const hasOnlinePayments = Boolean(shopSettings?.enableOnlinePayments !== false && upiId);
   const payeeName = (shopSettings?.upiPayeeName || shopName || 'Print Shop')
     .replace(/[^a-zA-Z0-9 ]/g, '')
     .trim()
@@ -175,6 +176,35 @@ export const CustomerCodeResult: React.FC<CustomerCodeResultProps> = ({
       setIsPaid(true);
       setPaymentSuccessMsg(`Payment recorded! Show code ${job.otp} at the counter.`);
       updateRecentJobPaymentStatus(job.id, 'paid', 'online_gpay');
+    } finally {
+      setIsConfirmingPayment(false);
+    }
+  };
+
+  // Confirm Cash Payment at Counter
+  const handleConfirmCashPaid = async () => {
+    setIsConfirmingPayment(true);
+    try {
+      const res = await fetch(`/api/jobs/${job.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paymentStatus: 'paid',
+          paymentMethod: 'counter',
+          notes: `Paid in Cash at Counter (${currency}${formattedPrice}) (${new Date().toLocaleTimeString()})`,
+        }),
+      });
+
+      soundEffects.playPaymentSuccess();
+      setIsPaid(true);
+      setPaymentSuccessMsg(`Payment of ${currency}${formattedPrice} recorded in Cash at Counter!`);
+      updateRecentJobPaymentStatus(job.id, 'paid', 'counter');
+      updateRecentJobPaymentStatus(job.otp, 'paid', 'counter');
+    } catch (err) {
+      soundEffects.playPaymentSuccess();
+      setIsPaid(true);
+      setPaymentSuccessMsg(`Payment recorded in Cash at Counter!`);
+      updateRecentJobPaymentStatus(job.id, 'paid', 'counter');
     } finally {
       setIsConfirmingPayment(false);
     }
@@ -319,9 +349,15 @@ export const CustomerCodeResult: React.FC<CustomerCodeResultProps> = ({
               </div>
 
               {isPaid ? (
-                <span className="inline-flex items-center text-xs font-extrabold text-emerald-800 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950 border border-emerald-300 dark:border-emerald-800 px-3 py-1 rounded-full shadow-2xs">
-                  <CheckCircle2 className="w-3.5 h-3.5 mr-1.5 text-emerald-600 dark:text-emerald-400" />
-                  PAID ONLINE ({currency}{formattedPrice})
+                <span className={`inline-flex items-center text-xs font-extrabold px-3 py-1 rounded-full shadow-2xs ${
+                  (job.paymentMethod === 'counter' || (job.notes && (job.notes.toLowerCase().includes('cash') || job.notes.toLowerCase().includes('offline'))))
+                    ? 'text-amber-800 dark:text-amber-300 bg-amber-100 dark:bg-amber-950 border border-amber-300 dark:border-amber-800'
+                    : 'text-emerald-800 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950 border border-emerald-300 dark:border-emerald-800'
+                }`}>
+                  <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
+                  {(job.paymentMethod === 'counter' || (job.notes && (job.notes.toLowerCase().includes('cash') || job.notes.toLowerCase().includes('offline'))))
+                    ? `PAID CASH AT COUNTER (${currency}${formattedPrice})`
+                    : `PAID DIGITALLY ONLINE (${currency}${formattedPrice})`}
                 </span>
               ) : (
                 <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2.5 py-0.5 rounded-full self-start sm:self-auto">
@@ -330,8 +366,43 @@ export const CustomerCodeResult: React.FC<CustomerCodeResultProps> = ({
               )}
             </div>
 
-            {/* If Online Payments are enabled by shop owner */}
-            {isOnlineEnabled ? (
+            {/* If Already Paid: Show exact payment mode receipt banner */}
+            {isPaid ? (
+              <div className="space-y-3">
+                {(job.paymentMethod === 'counter' || (job.notes && (job.notes.toLowerCase().includes('cash') || job.notes.toLowerCase().includes('offline')))) ? (
+                  <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/40 dark:to-orange-950/30 border-2 border-amber-300 dark:border-amber-700/80 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2 text-amber-900 dark:text-amber-200">
+                        <Store className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                        <span className="font-black text-sm sm:text-base">Payment Mode: Cash (Paid at Counter)</span>
+                      </div>
+                      <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
+                        Cash Settled ✓
+                      </span>
+                    </div>
+                    <p className="text-xs text-amber-900 dark:text-amber-100 font-medium leading-relaxed">
+                      You made the payment of <strong className="font-black">{currency}{formattedPrice}</strong> in cash at the store counter. Your cash payment was received and recorded at the counter desk.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/40 dark:to-teal-950/30 border-2 border-emerald-300 dark:border-emerald-700/80 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2 text-emerald-900 dark:text-emerald-200">
+                        <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                        <span className="font-black text-sm sm:text-base">Payment Mode: Digital Online Payment</span>
+                      </div>
+                      <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-emerald-200 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700">
+                        Digitally Paid ✓
+                      </span>
+                    </div>
+                    <p className="text-xs text-emerald-900 dark:text-emerald-100 font-medium leading-relaxed">
+                      You made the payment of <strong className="font-black">{currency}{formattedPrice}</strong> digitally via online UPI / Google Pay. Your online transaction has been recorded and confirmed.
+                    </p>
+                  </div>
+                )}
+              </div>
+            ) : hasOnlinePayments ? (
+              /* If Unpaid and online enabled: Show Cash vs Online Options */
               <div className="space-y-4">
                 {/* 2-Option Selector: Pay at Counter vs Online Payment */}
                 <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
@@ -362,10 +433,10 @@ export const CustomerCodeResult: React.FC<CustomerCodeResultProps> = ({
                     </div>
                     <div>
                       <span className="text-xs sm:text-sm font-extrabold text-slate-900 dark:text-slate-100 block leading-tight">
-                        Pay at Counter
+                        Cash at Counter
                       </span>
                       <span className="text-[10px] text-slate-500 dark:text-slate-400 block mt-0.5">
-                        Cash or Card upon pickup
+                        Pay in cash upon pickup
                       </span>
                     </div>
                   </button>
@@ -392,15 +463,15 @@ export const CustomerCodeResult: React.FC<CustomerCodeResultProps> = ({
                         <QrCode className="w-4 h-4" />
                       </div>
                       <span className="text-[9px] font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950 px-1.5 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800">
-                        GPay • UPI
+                        Digital • UPI
                       </span>
                     </div>
                     <div>
                       <span className="text-xs sm:text-sm font-extrabold text-slate-900 dark:text-slate-100 block leading-tight">
-                        Online Payment
+                        Digital / Online
                       </span>
                       <span className="text-[10px] text-slate-500 dark:text-slate-400 block mt-0.5">
-                        GPay barcode &amp; direct link
+                        GPay barcode &amp; UPI
                       </span>
                     </div>
                   </button>
@@ -411,22 +482,31 @@ export const CustomerCodeResult: React.FC<CustomerCodeResultProps> = ({
                   <motion.div
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-2"
+                    className="p-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-3"
                   >
                     <div className="flex items-start space-x-2.5">
                       <Store className="w-4 h-4 text-indigo-600 dark:text-yellow-400 shrink-0 mt-0.5" />
                       <div className="text-xs">
                         <p className="font-bold text-slate-900 dark:text-slate-100">
-                          Selected: Pay at Counter
+                          Selected: Cash Payment at Counter
                         </p>
                         <p className="text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
-                          Nothing extra to do! Simply show your 4-digit code{' '}
-                          <strong className="text-slate-900 dark:text-slate-100 font-black">{job.otp}</strong> at the
-                          counter and pay <strong className="text-slate-900 dark:text-slate-100">{currency}{formattedPrice}</strong> in
-                          cash or card when collecting your printouts.
+                          Show your 4-digit code <strong className="text-slate-900 dark:text-slate-100 font-black">{job.otp}</strong> at the
+                          counter desk and pay <strong className="text-slate-900 dark:text-slate-100">{currency}{formattedPrice}</strong> in
+                          cash when receiving your physical prints.
                         </p>
                       </div>
                     </div>
+
+                    <button
+                      type="button"
+                      disabled={isConfirmingPayment}
+                      onClick={handleConfirmCashPaid}
+                      className="w-full py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" />
+                      <span>{isConfirmingPayment ? 'Recording...' : `I Have Paid in Cash at Counter (${currency}{formattedPrice})`}</span>
+                    </button>
                   </motion.div>
                 )}
 

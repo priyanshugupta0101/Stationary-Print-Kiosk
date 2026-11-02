@@ -1,9 +1,11 @@
 {
   "pin": "PRINT145214",
   "contact": {
-    "name": "Platform Super Admin",
+    "name": "Priyanshu Gupta",
     "phone": "+91 98765 00111",
     "email": "guptapriyanshu0101@gmail.com",
-    "whatsappNumber": "+91 98765 00111"
+    "whatsappNumber": "+91 98765 00111",
+    "serviceProviderTitle": "Platform Founder & Lead Administrator",
+    "customNote": "Please reach out to activate subscription or restore kiosk access."
   }
 }

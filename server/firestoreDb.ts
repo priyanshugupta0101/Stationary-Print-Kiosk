@@ -330,28 +330,84 @@ export async function listPersistentJobs(
 
 export async function updatePersistentJobStatus(
   jobId: string,
-  updates: { status?: string; paymentStatus?: string; notes?: string }
+  updates: { status?: string; paymentStatus?: string; notes?: string; paymentMethod?: string }
 ): Promise<any | null> {
+  const cleanId = String(jobId).trim();
   try {
-    const docRef = doc(firestoreDb, 'print_jobs', jobId);
-    const snap = await getDoc(docRef);
-    if (!snap.exists()) return null;
+    let docRef = doc(firestoreDb, 'print_jobs', cleanId);
+    let snap = await getDoc(docRef);
 
-    const current = snap.data();
-    const updatedData: any = {
-      ...current,
-      ...updates,
-    };
-
-    if (updates.status === 'printed' && !current.printedAt) {
-      updatedData.printedAt = new Date().toISOString();
+    if (!snap.exists()) {
+      // 1. Try query by otp
+      const qOtp = query(collection(firestoreDb, 'print_jobs'), where('otp', '==', cleanId), limit(1));
+      const otpSnap = await getDocs(qOtp);
+      if (!otpSnap.empty) {
+        docRef = otpSnap.docs[0].ref;
+        snap = otpSnap.docs[0];
+      } else {
+        // 2. Try query by id field
+        const qId = query(collection(firestoreDb, 'print_jobs'), where('id', '==', cleanId), limit(1));
+        const idSnap = await getDocs(qId);
+        if (!idSnap.empty) {
+          docRef = idSnap.docs[0].ref;
+          snap = idSnap.docs[0];
+        } else {
+          console.warn(`[Firestore] Job not found for update: "${cleanId}"`);
+          return null;
+        }
+      }
     }
 
-    await setDoc(docRef, updatedData, { merge: true });
-    return updatedData;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.UPDATE, `print_jobs/${jobId}`);
+    const current = snap.data();
+    const cleanUpdates: any = {};
+    for (const [k, v] of Object.entries(updates)) {
+      if (v !== undefined) {
+        cleanUpdates[k] = v;
+      }
+    }
+
+    const updatedData: any = {
+      ...current,
+      ...cleanUpdates,
+    };
+
+    if (cleanUpdates.status === 'printed' && !current.printedAt) {
+      updatedData.printedAt = new Date().toISOString();
+    }
+    if (cleanUpdates.status === 'collected' && !current.collectedAt) {
+      updatedData.collectedAt = new Date().toISOString();
+    }
+
+    const sanitized = JSON.parse(JSON.stringify(updatedData));
+    await setDoc(docRef, sanitized, { merge: true });
+    return sanitized;
+  } catch (err: any) {
+    console.error(`[updatePersistentJobStatus ERROR]`, err);
+    handleFirestoreError(err, OperationType.UPDATE, `print_jobs/${cleanId}`);
     return null;
+  }
+}
+
+export async function getPersistentSuperAdminContact(): Promise<any | null> {
+  try {
+    const docRef = doc(firestoreDb, 'super_admin_config', 'helpline');
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return snap.data();
+    }
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, 'super_admin_config/helpline');
+  }
+  return null;
+}
+
+export async function savePersistentSuperAdminContact(contact: any): Promise<void> {
+  try {
+    const docRef = doc(firestoreDb, 'super_admin_config', 'helpline');
+    await setDoc(docRef, contact, { merge: true });
+    console.log('💾 Saved Super Admin Helpline & Support details to Firestore');
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'super_admin_config/helpline');
   }
 }
 

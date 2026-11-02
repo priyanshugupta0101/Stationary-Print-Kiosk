@@ -27,6 +27,7 @@ import {
   extendShopTrial,
   convertShopToFullPlan,
   getSuperAdminContact,
+  updateSuperAdminContact,
   deleteShop,
   verifySuperAdminPin,
   DEFAULT_SUPER_ADMIN_PIN,
@@ -36,6 +37,8 @@ import {
 import {
   resetFirestoreTestData,
   initFirestoreData,
+  updatePersistentJobStatus,
+  lookupPersistentJob,
 } from './server/firestoreDb.ts';
 import {
   getDemoModeState,
@@ -116,9 +119,9 @@ const upload = multer({
   limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
 });
 
-async function startServer() {
+export async function createExpressApp() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT || 3000;
 
   // Initialize Real Persistent Cloud Firestore & Synchronize Shops
   try {
@@ -164,7 +167,7 @@ async function startServer() {
   app.get('/api/settings', async (req, res) => {
     try {
       const shopSlug = String(req.query.shop || req.headers['x-shop-slug'] || '').trim();
-      const allShops = getAllShops();
+      const contactAdmin = getSuperAdminContact();
 
       if (shopSlug) {
         const tenant = getShopBySlugOrId(shopSlug);
@@ -186,33 +189,20 @@ async function startServer() {
             hoursLeftInTrial: tenant.hoursLeftInTrial,
             trialEndsAt: tenant.trialEndsAt,
             hasPin: Boolean(ownerPin),
+            contactAdmin,
           });
         }
-      } else if (allShops.length === 1) {
-        const tenant = allShops[0];
-        const { ownerPin, ...publicSettings } = tenant.settings;
-        return res.json({
-          ...publicSettings,
-          shopName: tenant.settings?.shopName || tenant.name || 'COPY',
-          shopId: tenant.id,
-          shopSlug: tenant.slug,
-          status: tenant.status,
-          isSuspended: tenant.status === 'suspended',
-          suspensionReason:
-            tenant.suspensionReason ||
-            (tenant.status === 'suspended' ? 'THE SUPER ADMIN HAS STOPPED YOUR SERVICE' : undefined),
-          isTrial: tenant.isTrial,
-          isTrialExpired: tenant.isTrialExpired,
-          daysLeftInTrial: tenant.daysLeftInTrial,
-          hoursLeftInTrial: tenant.hoursLeftInTrial,
-          trialEndsAt: tenant.trialEndsAt,
-          hasPin: Boolean(ownerPin),
-        });
       }
 
+      // Default platform settings when no explicit shop is specified
       const settings = await getShopSettings();
       const { ownerPin, ...publicSettings } = settings;
-      res.json({ ...publicSettings, shopName: 'COPY', hasPin: Boolean(ownerPin) });
+      res.json({
+        ...publicSettings,
+        shopName: 'COPY',
+        hasPin: Boolean(ownerPin),
+        contactAdmin,
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to fetch settings' });
     }
@@ -902,6 +892,37 @@ async function startServer() {
     }
   });
 
+  // Get Super Admin Helpline & Support details
+  app.get('/api/super-admin/contact', (_req, res) => {
+    try {
+      const contact = getSuperAdminContact();
+      res.json({ success: true, contact });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || 'Failed to get contact' });
+    }
+  });
+
+  // Update Super Admin Helpline & Support details
+  app.post('/api/super-admin/contact', (req, res) => {
+    const { pin, name, phone, email, whatsappNumber, serviceProviderTitle, customNote } = req.body;
+    if (pin && !verifySuperAdminPin(pin)) {
+      return res.status(401).json({ success: false, error: 'Unauthorized. Invalid Super Admin PIN.' });
+    }
+    try {
+      const updated = updateSuperAdminContact({
+        name,
+        phone,
+        email,
+        whatsappNumber,
+        serviceProviderTitle,
+        customNote,
+      });
+      res.json({ success: true, contact: updated, message: 'Super admin contact details updated successfully!' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || 'Failed to update contact' });
+    }
+  });
+
   // Download real-world database backup
   app.get('/api/database/backup', (_req, res) => {
     try {
@@ -1461,14 +1482,28 @@ async function startServer() {
         }
       }
 
-      const updatedJob = await updateCloudPrintJobStatus(id, {
+      let updatedJob = await updatePersistentJobStatus(id, {
         status,
         paymentStatus,
+        paymentMethod,
         notes: combinedNotes,
       });
 
       if (!updatedJob) {
-        return res.status(404).json({ error: 'Job not found' });
+        // Fallback lookup by id or otp
+        const found = await lookupPersistentJob(id);
+        if (found) {
+          updatedJob = await updatePersistentJobStatus(found.id, {
+            status,
+            paymentStatus,
+            paymentMethod,
+            notes: combinedNotes,
+          });
+        }
+      }
+
+      if (!updatedJob) {
+        return res.status(404).json({ error: 'Job not found', requestedId: id, body: req.body });
       }
 
       // Sync with local SQLite if present
@@ -1800,14 +1835,21 @@ async function startServer() {
     }
   });
 
+  return app;
+}
+
+export async function startServer() {
+  const app = await createExpressApp();
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+
   // Vite integration
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
-  } else {
+  } else if (!process.env.VERCEL) {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (_req, res) => {
@@ -1815,9 +1857,15 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Print Shop Server running with Cloud SQL at http://localhost:${PORT}`);
-  });
+  if (!process.env.VERCEL) {
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Print Shop Server running with Cloud SQL at http://localhost:${PORT}`);
+    });
+  }
+
+  return app;
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}

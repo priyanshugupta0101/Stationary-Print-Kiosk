@@ -256,20 +256,6 @@ export const Header: React.FC<HeaderProps> = ({
                         </div>
                       </button>
                     </div>
-
-                    {/* Shop Contact Footer in Menu */}
-                    <div className="mt-2 pt-2 border-t border-slate-800 px-3 py-1.5 flex items-center justify-between text-[11px] text-slate-400">
-                      <span>Counter: {cleanWhatsAppNumber || 'Available'}</span>
-                      <a
-                        href={whatsappUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-emerald-400 hover:text-emerald-300 font-bold inline-flex items-center space-x-1"
-                      >
-                        <span>Chat</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
                   </div>
                 )}
               </div>

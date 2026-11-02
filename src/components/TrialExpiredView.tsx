@@ -16,18 +16,19 @@ interface TrialExpiredViewProps {
   shopSettings: ShopSettings | null;
   shopSlug: string;
   onBackToCustomer: () => void;
-  onOpenSuperAdmin?: () => void;
 }
 
 export const TrialExpiredView: React.FC<TrialExpiredViewProps> = ({
   shopSettings,
   shopSlug,
   onBackToCustomer,
-  onOpenSuperAdmin,
 }) => {
   const shopName = shopSettings?.shopName || 'Your Shop';
-  const adminPhone = '+91 98765 00111';
-  const adminEmail = 'guptapriyanshu0101@gmail.com';
+  const contact = shopSettings?.contactAdmin;
+  const adminName = contact?.name || 'Platform Service Provider';
+  const adminPhone = contact?.phone || '+91 98765 00111';
+  const cleanWhatsApp = (contact?.whatsappNumber || '919876500111').replace(/\D/g, '');
+  const adminEmail = contact?.email || 'guptapriyanshu0101@gmail.com';
 
   const trialDays =
     shopSettings?.trialDurationDays === 4 || (shopSettings as any)?.plan === 'four_day_trial'
@@ -36,13 +37,13 @@ export const TrialExpiredView: React.FC<TrialExpiredViewProps> = ({
   const is4Day = trialDays === 4;
 
   const whatsappMessage = encodeURIComponent(
-    `Hello Super Admin! My shop "${shopName}" (${shopSlug}) has completed its ${is4Day ? '4-Day Free Plan' : '7-Day Free Trial'} on COPY Kiosk. We love the service and want to activate our subscription plan!`
+    `Hello ${adminName}! My shop "${shopName}" (${shopSlug}) has completed its ${is4Day ? '4-Day Free Plan' : '7-Day Free Trial'} on COPY Kiosk. We love the service and want to activate our subscription plan!`
   );
-  const whatsappUrl = `https://wa.me/919876500111?text=${whatsappMessage}`;
+  const whatsappUrl = `https://wa.me/${cleanWhatsApp}?text=${whatsappMessage}`;
 
   const emailSubject = encodeURIComponent(`COPY Kiosk Plan Activation: ${shopName}`);
   const emailBody = encodeURIComponent(
-    `Hi Super Admin,\n\nOur ${is4Day ? '4-day free plan has ended' : '7-day free trial has expired'} for "${shopName}" (${shopSlug}). We really love the kiosk service and would like to subscribe to continue accepting prints.\n\nThank you!`
+    `Hi ${adminName},\n\nOur ${is4Day ? '4-day free plan has ended' : '7-day free trial has expired'} for "${shopName}" (${shopSlug}). We really love the kiosk service and would like to subscribe to continue accepting prints.\n\nThank you!`
   );
   const emailUrl = `mailto:${adminEmail}?subject=${emailSubject}&body=${emailBody}`;
 
@@ -171,28 +172,16 @@ export const TrialExpiredView: React.FC<TrialExpiredViewProps> = ({
           </div>
 
           {/* Bottom Navigation Buttons */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
             <button
               id="back-to-kiosk-btn"
               type="button"
               onClick={onBackToCustomer}
-              className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center justify-center space-x-2 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              className="w-full sm:w-auto px-6 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center justify-center space-x-2 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
             >
               <ArrowLeft className="w-4 h-4" />
               <span>Back to Customer Upload Kiosk</span>
             </button>
-
-            {onOpenSuperAdmin && (
-              <button
-                id="open-super-admin-btn"
-                type="button"
-                onClick={onOpenSuperAdmin}
-                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold flex items-center justify-center space-x-2 shadow-sm transition-all cursor-pointer"
-              >
-                <ShieldCheck className="w-4 h-4" />
-                <span>Super Admin Hub</span>
-              </button>
-            )}
           </div>
         </div>
       </div>

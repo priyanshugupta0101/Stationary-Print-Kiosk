@@ -22,22 +22,62 @@ export interface SuperAdminContact {
   phone: string;
   email: string;
   whatsappNumber: string;
+  serviceProviderTitle?: string;
+  customNote?: string;
 }
 
+let cachedSuperAdminContact: SuperAdminContact | null = null;
+
 export function getSuperAdminContact(): SuperAdminContact {
+  if (cachedSuperAdminContact) return cachedSuperAdminContact;
   try {
     if (fs.existsSync(SUPER_ADMIN_CONFIG_FILE)) {
       const raw = fs.readFileSync(SUPER_ADMIN_CONFIG_FILE, 'utf-8');
       const cfg = JSON.parse(raw);
-      if (cfg.contact) return cfg.contact;
+      if (cfg.contact) {
+        cachedSuperAdminContact = cfg.contact;
+        return cfg.contact;
+      }
     }
   } catch (e) {}
-  return {
-    name: 'Platform Super Admin',
+  const fallback: SuperAdminContact = {
+    name: 'Priyanshu Gupta (Platform Service Provider)',
     phone: '+91 98765 00111',
     email: 'guptapriyanshu0101@gmail.com',
     whatsappNumber: '+91 98765 00111',
+    serviceProviderTitle: 'Super Admin Service Provider & Technical Lead',
+    customNote: 'For account activation, subscription extensions, or direct technical support, reach out directly.',
   };
+  cachedSuperAdminContact = fallback;
+  return fallback;
+}
+
+export function updateSuperAdminContact(contact: Partial<SuperAdminContact>): SuperAdminContact {
+  const current = getSuperAdminContact();
+  const updated: SuperAdminContact = {
+    ...current,
+    ...contact,
+  };
+  cachedSuperAdminContact = updated;
+  try {
+    let cfg: any = {};
+    if (fs.existsSync(SUPER_ADMIN_CONFIG_FILE)) {
+      try {
+        cfg = JSON.parse(fs.readFileSync(SUPER_ADMIN_CONFIG_FILE, 'utf-8'));
+      } catch (e) {}
+    }
+    cfg.contact = updated;
+    fs.writeFileSync(SUPER_ADMIN_CONFIG_FILE, JSON.stringify(cfg, null, 2));
+  } catch (err) {
+    console.warn('Error saving super admin contact to disk:', err);
+  }
+
+  // Sync to Firestore in background
+  import('./firestoreDb.ts').then(({ savePersistentSuperAdminContact }) => {
+    savePersistentSuperAdminContact(updated).catch(() => {});
+  }).catch(() => {});
+
+  return updated;
 }
 
 export function applyTrialCalculations(shop: ShopTenant): ShopTenant {

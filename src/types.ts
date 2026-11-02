@@ -101,6 +101,14 @@ export interface ShopSettings {
   isTrialExpired?: boolean;
   daysLeftInTrial?: number;
   hoursLeftInTrial?: number;
+  contactAdmin?: {
+    name: string;
+    phone: string;
+    email: string;
+    whatsappNumber: string;
+    serviceProviderTitle?: string;
+    customNote?: string;
+  };
 }
 
 export type ShopPlan = 'four_day_trial' | 'free_trial' | 'starter' | 'pro' | 'enterprise';

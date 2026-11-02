@@ -301,14 +301,15 @@ export function getDbFilePath(): string {
 
 export function clearAllDbJobs(): void {
   try {
-    if (!dbInstance) initDb();
-    dbInstance.run('DELETE FROM job_files');
-    dbInstance.run('DELETE FROM print_jobs');
+    if (dbInstance) {
+      dbInstance.run('DELETE FROM job_files');
+      dbInstance.run('DELETE FROM print_jobs');
+      saveDbToDisk();
+    }
     const JSON_JOBS_FILE = path.join(DATA_DIR, 'print_jobs.json');
     if (fs.existsSync(JSON_JOBS_FILE)) {
       fs.writeFileSync(JSON_JOBS_FILE, JSON.stringify([], null, 2));
     }
-    saveDbToDisk();
   } catch (err) {
     console.warn('Error clearing all local DB jobs:', err);
   }
