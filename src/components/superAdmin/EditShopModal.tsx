@@ -55,6 +55,7 @@ export const EditShopModal: React.FC<EditShopModalProps> = ({
     setSaving(true);
     setError(null);
 
+    const isTrialPlan = plan === 'four_day_trial' || plan === 'free_trial';
     const payload = {
       name,
       ownerName,
@@ -65,11 +66,17 @@ export const EditShopModal: React.FC<EditShopModalProps> = ({
       address,
       status,
       plan,
+      isTrial: isTrialPlan,
+      trialDurationDays: plan === 'four_day_trial' ? 4 : (plan === 'free_trial' ? 7 : undefined),
+      billingCycle: isTrialPlan ? 'trial' : (plan.startsWith('monthly_') ? 'monthly' : 'lifetime'),
       ownerPin: ownerPin.trim(),
       settingsUpdates: {
         shopName: name,
         tagline,
         status,
+        plan,
+        isTrial: isTrialPlan,
+        trialDurationDays: plan === 'four_day_trial' ? 4 : (plan === 'free_trial' ? 7 : undefined),
         isSuspended: status === 'suspended',
         suspensionReason: status === 'suspended' ? 'THE SUPER ADMIN HAS STOPPED YOUR SERVICE' : undefined,
         currency,
@@ -229,13 +236,23 @@ export const EditShopModal: React.FC<EditShopModalProps> = ({
                 <select
                   value={plan}
                   onChange={(e) => setPlan(e.target.value as ShopPlan)}
-                  className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:bg-white dark:focus:bg-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none font-bold"
                 >
-                  <option value="starter">Starter Plan</option>
-                  <option value="pro">Pro Plan (High Volume)</option>
-                  <option value="enterprise">Enterprise Campus Hub</option>
-                  <option value="four_day_trial">4-Day Free Plan</option>
-                  <option value="free_trial">7-Day Free Plan</option>
+                  <optgroup label="Free Trial Models">
+                    <option value="four_day_trial">4-Day Free Plan</option>
+                    <option value="free_trial">7-Day Free Plan</option>
+                  </optgroup>
+                  <optgroup label="Monthly Subscription Plans">
+                    <option value="monthly_starter">Monthly Starter (₹499/mo)</option>
+                    <option value="monthly_pro">Monthly Pro (₹999/mo)</option>
+                    <option value="monthly_enterprise">Monthly Enterprise (₹2,499/mo)</option>
+                  </optgroup>
+                  <optgroup label="Permanent / Lifetime Plans">
+                    <option value="starter">Permanent Starter (Lifetime)</option>
+                    <option value="pro">Permanent Pro (Lifetime)</option>
+                    <option value="enterprise">Permanent Enterprise (Lifetime)</option>
+                    <option value="permanent">Permanent All-Inclusive (Lifetime)</option>
+                  </optgroup>
                 </select>
               </div>
             </div>

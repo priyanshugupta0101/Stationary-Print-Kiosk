@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { ShopTenant, ShopSettings } from '../src/types.ts';
+import { ShopTenant, ShopSettings, ShopPlan } from '../src/types.ts';
 import {
   savePersistentShop,
   deletePersistentShop,
@@ -557,19 +557,96 @@ export async function extendShopTrial(
 
 export async function convertShopToFullPlan(
   slugOrId: string,
-  targetPlan: 'starter' | 'pro' | 'enterprise' = 'starter'
+  targetPlan: 'starter' | 'pro' | 'enterprise' | 'permanent' | 'monthly_starter' | 'monthly_pro' | 'monthly_enterprise' = 'starter'
 ): Promise<ShopTenant | null> {
-  return updateShop(slugOrId, {
+  return updateShopSubscription(slugOrId, {
+    plan: targetPlan as any,
     isTrial: false,
+    billingCycle: targetPlan.startsWith('monthly_') ? 'monthly' : 'lifetime',
+  });
+}
+
+export interface SubscriptionChangePayload {
+  plan: ShopPlan;
+  isTrial?: boolean;
+  trialDurationDays?: number;
+  trialDays?: number;
+  billingCycle?: 'trial' | 'monthly' | 'lifetime';
+  subscriptionExpiresAt?: string;
+  daysValid?: number;
+  resetStartDate?: boolean;
+  notes?: string;
+}
+
+export async function updateShopSubscription(
+  slugOrId: string,
+  payload: SubscriptionChangePayload
+): Promise<ShopTenant | null> {
+  const shop = await getShopBySlugOrIdAsync(slugOrId);
+  if (!shop) return null;
+
+  const targetPlan = payload.plan;
+  const isTrialPlan =
+    payload.isTrial !== undefined
+      ? payload.isTrial
+      : targetPlan === 'four_day_trial' || targetPlan === 'free_trial';
+
+  let trialDurationDays =
+    payload.trialDurationDays ||
+    payload.trialDays ||
+    (targetPlan === 'four_day_trial' ? 4 : 7);
+
+  let trialStartDate = shop.trialStartDate || new Date().toISOString();
+  let trialEndsAt = shop.trialEndsAt;
+
+  let billingCycle = payload.billingCycle;
+  if (!billingCycle) {
+    if (isTrialPlan) billingCycle = 'trial';
+    else if (targetPlan.startsWith('monthly_')) billingCycle = 'monthly';
+    else billingCycle = 'lifetime';
+  }
+
+  let subscriptionExpiresAt = payload.subscriptionExpiresAt;
+
+  if (isTrialPlan) {
+    if (payload.resetStartDate || !trialEndsAt || !shop.isTrial) {
+      trialStartDate = new Date().toISOString();
+      trialEndsAt = new Date(Date.now() + trialDurationDays * 24 * 60 * 60 * 1000).toISOString();
+    } else if (payload.daysValid) {
+      trialEndsAt = new Date(Date.now() + payload.daysValid * 24 * 60 * 60 * 1000).toISOString();
+    }
+  } else if (billingCycle === 'monthly') {
+    const days = payload.daysValid || 30;
+    subscriptionExpiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+    trialEndsAt = undefined;
+  } else {
+    // Permanent / Lifetime Plan
+    subscriptionExpiresAt = undefined;
+    trialEndsAt = undefined;
+  }
+
+  const updates: Partial<ShopTenant> & { settingsUpdates?: Partial<ShopSettings> } = {
     plan: targetPlan,
+    isTrial: isTrialPlan,
+    billingCycle,
+    subscriptionExpiresAt,
+    trialDurationDays: isTrialPlan ? trialDurationDays : undefined,
+    trialDays: isTrialPlan ? trialDurationDays : undefined,
+    trialStartDate: isTrialPlan ? trialStartDate : undefined,
+    trialEndsAt: isTrialPlan ? trialEndsAt : undefined,
     isTrialExpired: false,
-    status: 'active',
+    status: shop.status === 'suspended' ? 'active' : shop.status,
     settingsUpdates: {
-      isTrial: false,
+      plan: targetPlan as any,
+      isTrial: isTrialPlan,
+      trialDurationDays: isTrialPlan ? trialDurationDays : undefined,
+      trialEndsAt: isTrialPlan ? trialEndsAt : undefined,
       isTrialExpired: false,
       isSuspended: false,
     },
-  });
+  };
+
+  return updateShop(slugOrId, updates);
 }
 
 export async function deleteShop(slugOrId: string): Promise<boolean> {

@@ -93,7 +93,10 @@ export interface ShopSettings {
   isSuspended?: boolean;
   suspensionReason?: string;
   hasPin?: boolean;
-  // 7-Day Free Trial Configuration & State
+  plan?: ShopPlan;
+  billingCycle?: BillingCycle;
+  subscriptionExpiresAt?: string;
+  // Trial Configuration & State
   isTrial?: boolean;
   trialStartDate?: string;
   trialDurationDays?: number;
@@ -111,7 +114,18 @@ export interface ShopSettings {
   };
 }
 
-export type ShopPlan = 'four_day_trial' | 'free_trial' | 'starter' | 'pro' | 'enterprise';
+export type ShopPlan =
+  | 'four_day_trial'
+  | 'free_trial'
+  | 'monthly_starter'
+  | 'monthly_pro'
+  | 'monthly_enterprise'
+  | 'starter'
+  | 'pro'
+  | 'enterprise'
+  | 'permanent';
+
+export type BillingCycle = 'trial' | 'monthly' | 'lifetime';
 export type ShopStatus = 'active' | 'trial' | 'suspended';
 export type PrintExecutionMode = 'automatic' | 'manual';
 
@@ -128,6 +142,9 @@ export interface ShopTenant {
   status: ShopStatus;
   suspensionReason?: string;
   plan: ShopPlan;
+  billingCycle?: BillingCycle;
+  subscriptionExpiresAt?: string;
+  subscriptionRenewalDate?: string;
   createdAt: string;
   lastActiveAt?: string;
   totalJobsCount?: number;

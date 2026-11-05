@@ -11,6 +11,7 @@ import {
   Search,
   CheckCircle2,
   AlertCircle,
+  CreditCard,
   Copy,
   Check,
   ExternalLink,
@@ -43,6 +44,7 @@ import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { CounterStandeeModal } from './CounterStandeeModal';
 import { EditShopModal } from './EditShopModal';
+import { ManageSubscriptionModal } from './ManageSubscriptionModal';
 import { ShopGeneratorWizard } from './ShopGeneratorWizard';
 import { LiveDemoShowcase } from './LiveDemoShowcase';
 import { DemoModeSandbox } from './DemoModeSandbox';
@@ -104,6 +106,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
   // Modals & Selected Shop
   const [selectedShopForStandee, setSelectedShopForStandee] = useState<ShopTenant | null>(null);
   const [selectedShopForEdit, setSelectedShopForEdit] = useState<ShopTenant | null>(null);
+  const [selectedShopForSubscription, setSelectedShopForSubscription] = useState<ShopTenant | null>(null);
   const [activeDemoShop, setActiveDemoShop] = useState<ShopTenant | null>(null);
   const [isResetDataModalOpen, setIsResetDataModalOpen] = useState(false);
 
@@ -898,21 +901,25 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase shrink-0 bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800 animate-pulse">
                           ⛔ SERVICE STOPPED
                         </span>
-                      ) : shop.isTrial || shop.plan === 'free_trial' || shop.status === 'trial' ? (
+                      ) : shop.isTrial || shop.plan === 'four_day_trial' || shop.plan === 'free_trial' || shop.status === 'trial' ? (
                         shop.isTrialExpired ? (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase shrink-0 bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800 flex items-center space-x-1">
                             <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-ping mr-1" />
-                            TRIAL EXPIRED (0d Left)
+                            {shop.plan === 'four_day_trial' ? '4-DAY PLAN EXPIRED' : 'TRIAL EXPIRED'} (0d Left)
                           </span>
                         ) : (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase shrink-0 bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 flex items-center space-x-1">
                             <Clock className="w-3 h-3 text-amber-600 dark:text-amber-400 mr-1" />
-                            7-DAY TRIAL: {shop.daysLeftInTrial ?? 7}D LEFT
+                            {shop.plan === 'four_day_trial' ? '4-DAY PLAN' : '7-DAY TRIAL'}: {shop.daysLeftInTrial ?? (shop.plan === 'four_day_trial' ? 4 : 7)}D LEFT
                           </span>
                         )
+                      ) : shop.plan?.startsWith('monthly_') ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase shrink-0 bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                          MONTHLY {shop.plan.replace('monthly_', '').toUpperCase()}
+                        </span>
                       ) : (
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase shrink-0 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
-                          ACTIVE {shop.plan ? `(${shop.plan.toUpperCase()})` : ''}
+                          PERMANENT {shop.plan ? `(${shop.plan.toUpperCase()})` : ''}
                         </span>
                       )}
                     </div>
@@ -1009,8 +1016,8 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                       </div>
                     </div>
 
-                    {/* 7-Day Free Trial System Management Block */}
-                    {shop.isTrial || shop.plan === 'free_trial' || shop.status === 'trial' ? (
+                    {/* Subscription & Plan System Management Block */}
+                    {shop.isTrial || shop.plan === 'four_day_trial' || shop.plan === 'free_trial' || shop.status === 'trial' ? (
                       <div
                         className={`p-3.5 rounded-2xl mb-3 border transition-all ${
                           shop.isTrialExpired
@@ -1026,7 +1033,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                               }`}
                             />
                             <span className="text-[11px] font-black uppercase tracking-tight">
-                              7-Day Free Trial System
+                              {shop.plan === 'four_day_trial' ? '4-Day Free Plan System' : '7-Day Free Trial System'}
                             </span>
                           </div>
                           {shop.isTrialExpired ? (
@@ -1035,7 +1042,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                             </span>
                           ) : (
                             <span className="text-[10px] font-mono font-extrabold text-indigo-700 dark:text-yellow-400 bg-white dark:bg-slate-800 px-2 py-0.5 rounded-md border border-indigo-200 dark:border-slate-700 shadow-2xs">
-                              {shop.daysLeftInTrial ?? 7} Days Left
+                              {shop.daysLeftInTrial ?? (shop.plan === 'four_day_trial' ? 4 : 7)} Days Left
                             </span>
                           )}
                         </div>
@@ -1045,16 +1052,18 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                             <span className="font-bold block text-rose-950 dark:text-rose-100 mb-0.5">
                               ⚠️ Auto-Expired: Desk Access Blocked
                             </span>
-                            When shop owner tries to login, desk shows:{' '}
+                            When shop owner logs in, screen displays:{' '}
                             <span className="italic font-bold text-rose-950 dark:text-rose-100">
-                              "your free trial session is expire if you love the service contact with the admin"
+                              {shop.plan === 'four_day_trial'
+                                ? '"Your four-day free plan has ended. Contact the super admin"'
+                                : '"Your free trial session is expire if you love the service contact with the admin"'}
                             </span>
                           </div>
                         ) : (
                           <div className="space-y-1 mb-2.5">
                             <div className="flex items-center justify-between text-[10px] text-slate-600 dark:text-slate-300 font-bold">
-                              <span>Auto-expires after 7 days</span>
-                              <span>{Math.max(0, shop.daysLeftInTrial ?? 7)} days remaining</span>
+                              <span>Auto-expires after {shop.plan === 'four_day_trial' ? 4 : 7} days</span>
+                              <span>{Math.max(0, shop.daysLeftInTrial ?? (shop.plan === 'four_day_trial' ? 4 : 7))} days remaining</span>
                             </div>
                             <div className="w-full bg-slate-200/80 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
                               <div
@@ -1062,7 +1071,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                                 style={{
                                   width: `${Math.min(
                                     100,
-                                    Math.max(8, ((7 - (shop.daysLeftInTrial ?? 7)) / 7) * 100)
+                                    Math.max(8, (((shop.plan === 'four_day_trial' ? 4 : 7) - (shop.daysLeftInTrial ?? (shop.plan === 'four_day_trial' ? 4 : 7))) / (shop.plan === 'four_day_trial' ? 4 : 7)) * 100)
                                   )}%`,
                                 }}
                               />
@@ -1070,14 +1079,14 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                           </div>
                         )}
 
-                        {/* Super Admin Quick Trial Controls */}
+                        {/* Super Admin Quick Subscription Controls */}
                         <div className="grid grid-cols-2 gap-1.5 pt-1">
                           <button
                             type="button"
-                            onClick={() => handleExtendTrial(shop.slug, shop.name, 7)}
+                            onClick={() => handleExtendTrial(shop.slug, shop.name, shop.plan === 'four_day_trial' ? 4 : 7)}
                             disabled={extendingTrialSlug === shop.slug}
                             className="flex items-center justify-center space-x-1 py-1.5 px-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-indigo-800 dark:text-yellow-400 text-[10px] font-extrabold rounded-lg border border-indigo-200 dark:border-slate-700 shadow-2xs transition-all cursor-pointer disabled:opacity-50"
-                            title="Add 7 extra days to this shop's trial session"
+                            title={`Add extra days to this shop's trial session`}
                           >
                             <Hourglass
                               className={`w-3 h-3 text-indigo-600 dark:text-yellow-400 ${
@@ -1085,45 +1094,78 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                               }`}
                             />
                             <span>
-                              {extendingTrialSlug === shop.slug ? 'Extending...' : '+7 Days Trial'}
+                              {extendingTrialSlug === shop.slug ? 'Extending...' : `+${shop.plan === 'four_day_trial' ? 4 : 7} Days`}
                             </span>
                           </button>
 
                           <button
                             type="button"
-                            onClick={() => handleConvertPlan(shop.slug, shop.name, 'starter')}
-                            disabled={convertingPlanSlug === shop.slug}
-                            className="flex items-center justify-center space-x-1 py-1.5 px-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 dark:from-yellow-500 dark:to-amber-500 text-white dark:text-slate-950 text-[10px] font-extrabold rounded-lg shadow-2xs transition-all cursor-pointer disabled:opacity-50"
-                            title="Upgrade this shop to a permanent commercial plan"
+                            onClick={() => setSelectedShopForSubscription(shop)}
+                            className="flex items-center justify-center space-x-1 py-1.5 px-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 dark:from-yellow-500 dark:to-amber-500 text-white dark:text-slate-950 text-[10px] font-extrabold rounded-lg shadow-2xs transition-all cursor-pointer"
+                            title="Manage and switch subscription model (Trial, Monthly, Permanent)"
                           >
-                            <Zap
-                              className={`w-3 h-3 text-amber-300 dark:text-slate-950 ${
-                                convertingPlanSlug === shop.slug ? 'animate-spin' : ''
-                              }`}
-                            />
-                            <span>
-                              {convertingPlanSlug === shop.slug ? 'Upgrading...' : 'Upgrade Plan'}
-                            </span>
+                            <Zap className="w-3 h-3 text-amber-300 dark:text-slate-950" />
+                            <span>Change Plan</span>
                           </button>
                         </div>
                       </div>
-                    ) : (
-                      <div className="p-2.5 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 mb-3 flex items-center justify-between text-xs">
-                        <div className="flex items-center space-x-1.5">
-                          <Zap className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                          <span className="text-[11px] font-black uppercase text-slate-800 dark:text-slate-200">
-                            Plan: {(shop.plan || 'Starter').toUpperCase()}
+                    ) : shop.plan?.startsWith('monthly_') ? (
+                      <div className="p-3 rounded-2xl bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200/80 dark:border-purple-800 mb-3 text-xs">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center space-x-1.5">
+                            <Calendar className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                            <span className="text-[11px] font-black uppercase text-purple-900 dark:text-purple-200">
+                              Monthly: {shop.plan.replace('monthly_', '').toUpperCase()}
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-bold text-purple-700 dark:text-purple-300 bg-white dark:bg-slate-800 px-2 py-0.5 rounded-full border border-purple-200 dark:border-purple-700">
+                            Monthly Recurring
                           </span>
                         </div>
-                        <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
-                          Permanent Active
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedShopForSubscription(shop)}
+                          className="w-full py-1 text-[10px] font-black uppercase tracking-wider text-purple-700 dark:text-yellow-400 hover:underline flex items-center justify-center space-x-1"
+                        >
+                          <span>Manage Monthly Renewal &amp; Tier →</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 mb-3 text-xs">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center space-x-1.5">
+                            <Zap className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                            <span className="text-[11px] font-black uppercase text-slate-800 dark:text-slate-200">
+                              Plan: {(shop.plan || 'Permanent').toUpperCase()}
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+                            Lifetime Active
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedShopForSubscription(shop)}
+                          className="w-full py-1 text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-yellow-400 hover:underline flex items-center justify-center space-x-1"
+                        >
+                          <span>Modify Subscription Model →</span>
+                        </button>
                       </div>
                     )}
                   </div>
 
                   {/* Actions Bar */}
                   <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                    {/* Primary Subscription Management Button */}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedShopForSubscription(shop)}
+                      className="w-full flex items-center justify-center space-x-2 py-2 bg-gradient-to-r from-purple-50 via-indigo-50 to-purple-50 dark:from-purple-950/40 dark:via-indigo-950/40 dark:to-purple-950/40 hover:from-purple-100 hover:to-indigo-100 dark:hover:from-purple-900/60 dark:hover:to-indigo-900/60 text-purple-800 dark:text-yellow-400 border border-purple-200 dark:border-purple-800 text-xs font-black rounded-xl transition-all cursor-pointer shadow-2xs"
+                      title="Manage subscription model: 4-day trial, 7-day trial, monthly recurring, or permanent lifetime plan"
+                    >
+                      <CreditCard className="w-3.5 h-3.5 text-purple-600 dark:text-yellow-400" />
+                      <span>Manage Subscription &amp; Plan</span>
+                    </button>
                     {/* Master System Operational Toggle: Enable / Disable Service */}
                     {shop.status === 'suspended' ? (
                       <button
@@ -1528,6 +1570,19 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
           isOpen={true}
           onClose={() => setSelectedShopForEdit(null)}
           onSaved={handleShopSaved}
+        />
+      )}
+
+      {/* Manage Client Subscription & Plan Model Modal */}
+      {selectedShopForSubscription && (
+        <ManageSubscriptionModal
+          shop={selectedShopForSubscription}
+          isOpen={true}
+          onClose={() => setSelectedShopForSubscription(null)}
+          onUpdated={(updatedShop) => {
+            setShops((prev) => prev.map((s) => (s.slug === updatedShop.slug ? updatedShop : s)));
+            showToast(`✓ Subscription model updated for "${updatedShop.name}"!`);
+          }}
         />
       )}
 

@@ -609,9 +609,17 @@ export const ShopGeneratorWizard: React.FC<ShopGeneratorWizardProps> = ({
                     onClick={(e) => e.stopPropagation()}
                     className="px-2.5 py-1 text-xs font-bold border border-indigo-300 dark:border-indigo-700 rounded-lg bg-white dark:bg-slate-900 text-indigo-900 dark:text-indigo-200 outline-none"
                   >
-                    <option value="starter">Starter Plan (Up to 500 orders/mo)</option>
-                    <option value="pro">Pro Plan (Unlimited high volume)</option>
-                    <option value="enterprise">Enterprise (Campus multi-stationery)</option>
+                    <optgroup label="Permanent / Lifetime Plans">
+                      <option value="starter">Permanent Starter Plan</option>
+                      <option value="pro">Permanent Pro Plan (High Volume)</option>
+                      <option value="enterprise">Permanent Enterprise (Campus Hub)</option>
+                      <option value="permanent">Permanent All-Inclusive</option>
+                    </optgroup>
+                    <optgroup label="Monthly Subscription Plans">
+                      <option value="monthly_starter">Monthly Starter (₹499/mo)</option>
+                      <option value="monthly_pro">Monthly Pro (₹999/mo)</option>
+                      <option value="monthly_enterprise">Monthly Enterprise (₹2,499/mo)</option>
+                    </optgroup>
                   </select>
                 </div>
               )}

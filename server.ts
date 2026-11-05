@@ -27,6 +27,7 @@ import {
   toggleShopStatus,
   extendShopTrial,
   convertShopToFullPlan,
+  updateShopSubscription,
   getSuperAdminContact,
   updateSuperAdminContact,
   deleteShop,
@@ -542,6 +543,48 @@ export async function createExpressApp() {
       });
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Failed to convert plan' });
+    }
+  });
+
+  // Manage and update client subscription model anytime (Free trial, Monthly, Permanent)
+  app.post('/api/super-admin/shops/:slugOrId/subscription', async (req, res) => {
+    try {
+      const {
+        plan,
+        isTrial,
+        trialDurationDays,
+        trialDays,
+        billingCycle,
+        subscriptionExpiresAt,
+        daysValid,
+        resetStartDate,
+      } = req.body || {};
+
+      if (!plan) {
+        return res.status(400).json({ error: 'Missing required field: plan' });
+      }
+
+      const updated = await updateShopSubscription(req.params.slugOrId, {
+        plan,
+        isTrial,
+        trialDurationDays: trialDurationDays || trialDays,
+        billingCycle,
+        subscriptionExpiresAt,
+        daysValid,
+        resetStartDate,
+      });
+
+      if (!updated) {
+        return res.status(404).json({ error: 'Shop not found' });
+      }
+
+      res.json({
+        success: true,
+        shop: updated,
+        message: `Subscription for "${updated.name}" updated to ${String(plan).replace('_', ' ').toUpperCase()} successfully!`,
+      });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to update subscription' });
     }
   });
 
