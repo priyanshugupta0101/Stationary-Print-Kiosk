@@ -132,10 +132,11 @@ export interface ShopTenant {
   lastActiveAt?: string;
   totalJobsCount?: number;
   totalRevenue?: number;
-  // 7-Day Free Trial Configuration & State
+  // Trial Configuration & State
   isTrial?: boolean;
   trialStartDate?: string;
   trialDurationDays?: number;
+  trialDays?: number;
   trialEndsAt?: string;
   isTrialExpired?: boolean;
   daysLeftInTrial?: number;

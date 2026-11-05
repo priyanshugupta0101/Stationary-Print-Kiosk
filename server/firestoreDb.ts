@@ -73,6 +73,10 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 let cachedFirestoreShops: ShopTenant[] | null = null;
 let isInitialized = false;
 
+export function getCachedFirestoreShops(): ShopTenant[] | null {
+  return cachedFirestoreShops;
+}
+
 export async function initFirestoreData(): Promise<void> {
   if (isInitialized) return;
   try {

@@ -27,6 +27,8 @@ import {
   Edit3,
 } from 'lucide-react';
 import { PrintJob, ShopSettings, UploadedFileMeta, PrintExecutionMode } from '../types';
+import { collection, doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { FileViewerModal } from './FileViewerModal';
 import { CustomerQrModal } from './CustomerQrModal';
 import { triggerSystemPrint, triggerAutoPrint, AutoPrintOptions } from '../utils/printHelper';
@@ -102,9 +104,60 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
 
   useEffect(() => {
     fetchQueue();
-    const interval = setInterval(fetchQueue, 3000);
-    return () => clearInterval(interval);
-  }, []);
+
+    const shopSlugParam = shopSettings?.shopSlug || (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('shop') : '') || '';
+
+    let unsubscribe: (() => void) | undefined;
+    try {
+      unsubscribe = onSnapshot(collection(db, 'print_jobs'), (snapshot) => {
+        const liveJobs: PrintJob[] = [];
+        snapshot.forEach((docSnap) => {
+          const item = docSnap.data() as PrintJob;
+          if (item && (item.id || item.otp)) {
+            // Filter by shop if this counter desk belongs to a specific tenant
+            if (shopSlugParam && item.shopSlug && item.shopSlug.toLowerCase() !== shopSlugParam.toLowerCase()) {
+              return;
+            }
+            // Keep active queue items (not collected/finished)
+            if (item.status !== 'collected') {
+              liveJobs.push({ ...item, id: item.id || docSnap.id });
+            }
+          }
+        });
+        liveJobs.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        setPendingQueue(liveJobs);
+      }, (err) => {
+        console.warn('Real-time Firestore queue sync error:', err);
+      });
+    } catch (e) {
+      console.warn('Could not attach Firestore queue listener:', e);
+    }
+
+    const interval = setInterval(fetchQueue, 5000);
+    return () => {
+      if (unsubscribe) unsubscribe();
+      clearInterval(interval);
+    };
+  }, [shopSettings?.shopSlug]);
+
+  // Sync active open job with Firestore in real-time
+  useEffect(() => {
+    if (!activeJob?.id) return;
+    let unsub: (() => void) | undefined;
+    try {
+      unsub = onSnapshot(doc(db, 'print_jobs', activeJob.id), (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as PrintJob;
+          setActiveJob(prev => (prev ? { ...prev, ...data, id: snap.id } : null));
+        }
+      });
+    } catch (e) {
+      // ignore
+    }
+    return () => {
+      if (unsub) unsub();
+    };
+  }, [activeJob?.id]);
 
   // Fetch job by OTP
   const handleLookupOtp = async (codeToLookup?: string) => {

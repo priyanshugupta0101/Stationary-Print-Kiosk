@@ -16,7 +16,9 @@ import { OwnerSettingsView } from './components/OwnerSettingsView';
 import { SuperAdminView } from './components/superAdmin/SuperAdminView';
 import { ServiceSuspendedView } from './components/ServiceSuspendedView';
 import { TrialExpiredView } from './components/TrialExpiredView';
-import { ShopSettings, PrintJob } from './types';
+import { ShopSettings, PrintJob, ShopTenant } from './types';
+import { collection, onSnapshot } from 'firebase/firestore';
+import { db } from './lib/firebase';
 import { saveRecentCustomerJob } from './utils/customerJobsStorage';
 import { soundEffects } from './utils/soundEffects';
 import { Lock, AlertCircle, X, ArrowRight, Store, ShieldCheck, AlertOctagon, Clock, Volume2, VolumeX, Sparkles, Zap } from 'lucide-react';
@@ -201,7 +203,54 @@ export default function App() {
 
     fetchSettings(activeShopSlug);
     fetchPendingCount(activeShopSlug);
-    const interval = setInterval(() => fetchPendingCount(activeShopSlug), 8000);
+    const interval = setInterval(() => fetchPendingCount(activeShopSlug), 10000);
+
+    // Real-time synchronization for shop settings & pending count via Cloud Firestore
+    let unsubShop: (() => void) | undefined;
+    let unsubJobs: (() => void) | undefined;
+    try {
+      unsubShop = onSnapshot(collection(db, 'shops'), (snapshot) => {
+        snapshot.forEach((docSnap) => {
+          const s = docSnap.data() as ShopTenant;
+          const match = activeShopSlug
+            ? (s.slug?.toLowerCase() === activeShopSlug.toLowerCase() || s.id === activeShopSlug)
+            : false;
+          if (match) {
+            setShopSettings((prev) => ({
+              ...DEFAULT_INITIAL_SETTINGS,
+              ...(prev || {}),
+              ...(s.settings || {}),
+              shopName: s.name || s.settings?.shopName || 'COPY',
+              shopSlug: s.slug || activeShopSlug,
+              status: s.status,
+              isSuspended: s.status === 'suspended',
+              plan: s.plan,
+              trialEndsAt: s.trialEndsAt,
+              trialDays: s.trialDays,
+            }));
+          }
+        });
+      }, (err) => {
+        console.warn('Real-time shop sync error:', err);
+      });
+
+      unsubJobs = onSnapshot(collection(db, 'print_jobs'), (snapshot) => {
+        let count = 0;
+        snapshot.forEach((docSnap) => {
+          const item = docSnap.data() as PrintJob;
+          if (item && item.status === 'pending') {
+            if (!activeShopSlug || !item.shopSlug || item.shopSlug.toLowerCase() === activeShopSlug.toLowerCase()) {
+              count++;
+            }
+          }
+        });
+        setPendingQueueCount(count);
+      }, (err) => {
+        console.warn('Real-time queue count sync error:', err);
+      });
+    } catch (e) {
+      console.warn('Could not attach Firestore onSnapshot in App:', e);
+    }
 
     // Support query parameters for direct links
     if (typeof window !== 'undefined') {
@@ -223,7 +272,11 @@ export default function App() {
       }
     }
 
-    return () => clearInterval(interval);
+    return () => {
+      if (unsubShop) unsubShop();
+      if (unsubJobs) unsubJobs();
+      clearInterval(interval);
+    };
   }, [activeShopSlug]);
 
   const handleSelectView = (view: AppNavView) => {

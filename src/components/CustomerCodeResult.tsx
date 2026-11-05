@@ -18,6 +18,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import QRCode from 'qrcode';
 import confetti from 'canvas-confetti';
 import { PrintJob, ShopSettings } from '../types';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { updateRecentJobPaymentStatus } from '../utils/customerJobsStorage';
 import { soundEffects } from '../utils/soundEffects';
 
@@ -112,6 +114,34 @@ export const CustomerCodeResult: React.FC<CustomerCodeResultProps> = ({
         .catch((err) => console.error('Failed to generate UPI QR:', err));
     }
   }, [paymentMode, activeUpiUri]);
+
+  // Listen for real-time updates from Owner Desk on another device
+  useEffect(() => {
+    if (!job.id) return;
+    let unsub: (() => void) | undefined;
+    try {
+      unsub = onSnapshot(doc(db, 'print_jobs', job.id), (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as PrintJob;
+          if (data.paymentStatus === 'paid' && !isPaid) {
+            setIsPaid(true);
+            setPaymentSuccessMsg(
+              data.paymentMethod === 'counter'
+                ? `Payment confirmed in Cash at Counter!`
+                : `Payment confirmed via GPay / UPI!`
+            );
+            updateRecentJobPaymentStatus(job.id, 'paid', data.paymentMethod || 'counter');
+            updateRecentJobPaymentStatus(job.otp, 'paid', data.paymentMethod || 'counter');
+          }
+        }
+      });
+    } catch (e) {
+      // ignore
+    }
+    return () => {
+      if (unsub) unsub();
+    };
+  }, [job.id, isPaid]);
 
   const copyCode = () => {
     navigator.clipboard.writeText(job.otp);

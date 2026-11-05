@@ -39,6 +39,8 @@ import {
   Headphones,
 } from 'lucide-react';
 import { ShopTenant, SuperAdminStats } from '../../types';
+import { collection, onSnapshot } from 'firebase/firestore';
+import { db } from '../../lib/firebase';
 import { CounterStandeeModal } from './CounterStandeeModal';
 import { EditShopModal } from './EditShopModal';
 import { ShopGeneratorWizard } from './ShopGeneratorWizard';
@@ -188,11 +190,44 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
   };
 
   useEffect(() => {
-    if (isAuthenticated) {
-      loadShops();
-      loadStats();
-      loadContactData();
+    if (!isAuthenticated) return;
+    loadShops();
+    loadStats();
+    loadContactData();
+
+    // Real-time synchronization across multiple devices via Cloud Firestore
+    let unsubscribe: (() => void) | undefined;
+    try {
+      unsubscribe = onSnapshot(
+        collection(db, 'shops'),
+        (snapshot) => {
+          const liveShops: ShopTenant[] = [];
+          snapshot.forEach((docSnap) => {
+            const data = docSnap.data() as ShopTenant;
+            if (data && (data.id || data.slug || docSnap.id)) {
+              liveShops.push({
+                ...data,
+                id: data.id || docSnap.id,
+                slug: data.slug || docSnap.id,
+              });
+            }
+          });
+          if (liveShops.length > 0) {
+            liveShops.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+            setShops(liveShops);
+          }
+        },
+        (error) => {
+          console.warn('Real-time Firestore sync error in SuperAdmin:', error);
+        }
+      );
+    } catch (e) {
+      console.warn('Could not attach Firestore onSnapshot listener:', e);
     }
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, [isAuthenticated]);
 
   // Verify Super Admin PIN
@@ -265,12 +300,6 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
     }
   };
 
-  useEffect(() => {
-    if (isAuthenticated) {
-      loadShops();
-      loadStats();
-    }
-  }, [isAuthenticated]);
 
   const handleSeedOrders = async (shopSlug: string) => {
     try {

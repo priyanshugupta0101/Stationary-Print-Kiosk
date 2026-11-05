@@ -5,6 +5,8 @@ import {
   savePersistentShop,
   deletePersistentShop,
   getPersistentShops,
+  getPersistentShopBySlugOrId,
+  getCachedFirestoreShops,
 } from './firestoreDb.ts';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -229,6 +231,11 @@ function saveShopsToDisk(shops: ShopTenant[]) {
 }
 
 export function getAllShops(): ShopTenant[] {
+  // Check Cloud Firestore in-memory cache first
+  const cloudShops = getCachedFirestoreShops();
+  if (cloudShops && cloudShops.length > 0) {
+    return cloudShops.map((s) => applyTrialCalculations(s));
+  }
   const raw = loadShopsFromDisk();
   return raw.map((s) => applyTrialCalculations(s));
 }
@@ -239,6 +246,17 @@ export function getShopBySlugOrId(slugOrId: string): ShopTenant | null {
   if (clean === 'demo-sandbox-shop' || clean === 'shop_demo_sandbox' || clean === 'demo-shop') {
     return applyTrialCalculations(getDemoShop());
   }
+
+  // 1. Check Cloud Firestore in-memory cache
+  const cloudShops = getCachedFirestoreShops();
+  if (cloudShops && cloudShops.length > 0) {
+    const match = cloudShops.find(
+      (s) => s.slug.toLowerCase() === clean || s.id.toLowerCase() === clean
+    );
+    if (match) return applyTrialCalculations(match);
+  }
+
+  // 2. Check disk cache
   const shops = loadShopsFromDisk();
   const found = shops.find(
     (s) => s.slug.toLowerCase() === clean || s.id.toLowerCase() === clean
@@ -246,7 +264,28 @@ export function getShopBySlugOrId(slugOrId: string): ShopTenant | null {
   return found ? applyTrialCalculations(found) : null;
 }
 
-export function createShop(data: {
+export async function getShopBySlugOrIdAsync(slugOrId: string): Promise<ShopTenant | null> {
+  const syncMatch = getShopBySlugOrId(slugOrId);
+  if (syncMatch) return syncMatch;
+
+  // 3. Fallback direct Cloud Firestore query (ensures newly created or persisted shops across devices/deployments are always discovered)
+  try {
+    const cloudShop = await getPersistentShopBySlugOrId(slugOrId);
+    if (cloudShop) {
+      const shops = loadShopsFromDisk();
+      if (!shops.some((s) => s.id === cloudShop.id)) {
+        shops.unshift(cloudShop);
+        saveShopsToDisk(shops);
+      }
+      return applyTrialCalculations(cloudShop);
+    }
+  } catch (err) {
+    console.warn('Direct Firestore shop lookup warning:', err);
+  }
+  return null;
+}
+
+export async function createShop(data: {
   name: string;
   slug?: string;
   ownerName?: string;
@@ -255,7 +294,7 @@ export function createShop(data: {
   email?: string;
   whatsappNumber?: string;
   address?: string;
-  plan?: 'free_trial' | 'starter' | 'pro' | 'enterprise';
+  plan?: 'four_day_trial' | 'free_trial' | 'starter' | 'pro' | 'enterprise';
   status?: 'active' | 'trial' | 'suspended';
   isTrial?: boolean;
   trialDurationDays?: number;
@@ -267,7 +306,7 @@ export function createShop(data: {
   enableOnlinePayments?: boolean;
   ownerPin?: string;
   settings?: Partial<ShopSettings>;
-}): ShopTenant {
+}): Promise<ShopTenant> {
   const shops = loadShopsFromDisk();
 
   // Compute unique slug
@@ -357,14 +396,18 @@ export function createShop(data: {
   shops.unshift(newShop);
   saveShopsToDisk(shops);
   // Persist permanently in Firestore database
-  savePersistentShop(newShop).catch((err) => console.warn('Firestore shop save error:', err));
+  try {
+    await savePersistentShop(newShop);
+  } catch (err) {
+    console.error('CRITICAL: Error persisting new shop to Firestore:', err);
+  }
   return newShop;
 }
 
-export function updateShop(
+export async function updateShop(
   slugOrId: string,
   updates: Partial<ShopTenant> & { settingsUpdates?: Partial<ShopSettings> }
-): ShopTenant | null {
+): Promise<ShopTenant | null> {
   const clean = slugOrId.trim().toLowerCase();
   if (clean === 'demo-sandbox-shop' || clean === 'shop_demo_sandbox' || clean === 'demo-shop') {
     const current = inMemoryDemoShop;
@@ -453,16 +496,20 @@ export function updateShop(
   shops[index] = updated;
   saveShopsToDisk(shops);
   // Persist permanently in Firestore database
-  savePersistentShop(updated).catch((err) => console.warn('Firestore shop update error:', err));
+  try {
+    await savePersistentShop(updated);
+  } catch (err) {
+    console.error('CRITICAL: Error persisting updated shop to Firestore:', err);
+  }
   return updated;
 }
 
-export function toggleShopStatus(
+export async function toggleShopStatus(
   slugOrId: string,
   targetStatus?: 'active' | 'suspended',
   reason?: string
-): ShopTenant | null {
-  const shop = getShopBySlugOrId(slugOrId);
+): Promise<ShopTenant | null> {
+  const shop = await getShopBySlugOrIdAsync(slugOrId);
   if (!shop) return null;
   const newStatus = targetStatus || (shop.status === 'suspended' ? 'active' : 'suspended');
   return updateShop(slugOrId, {
@@ -478,11 +525,11 @@ export function toggleShopStatus(
   });
 }
 
-export function extendShopTrial(
+export async function extendShopTrial(
   slugOrId: string,
   additionalDays: number = 7
-): ShopTenant | null {
-  const shop = getShopBySlugOrId(slugOrId);
+): Promise<ShopTenant | null> {
+  const shop = await getShopBySlugOrIdAsync(slugOrId);
   if (!shop) return null;
 
   const currentEndsAtMs = shop.trialEndsAt
@@ -508,10 +555,10 @@ export function extendShopTrial(
   });
 }
 
-export function convertShopToFullPlan(
+export async function convertShopToFullPlan(
   slugOrId: string,
   targetPlan: 'starter' | 'pro' | 'enterprise' = 'starter'
-): ShopTenant | null {
+): Promise<ShopTenant | null> {
   return updateShop(slugOrId, {
     isTrial: false,
     plan: targetPlan,
@@ -525,7 +572,7 @@ export function convertShopToFullPlan(
   });
 }
 
-export function deleteShop(slugOrId: string): boolean {
+export async function deleteShop(slugOrId: string): Promise<boolean> {
   const shops = loadShopsFromDisk();
   const clean = slugOrId.trim().toLowerCase();
   const filtered = shops.filter(
@@ -535,7 +582,11 @@ export function deleteShop(slugOrId: string): boolean {
   if (filtered.length === shops.length) return false;
   saveShopsToDisk(filtered);
   // Delete permanently from Firestore database
-  deletePersistentShop(clean).catch((err) => console.warn('Firestore shop delete error:', err));
+  try {
+    await deletePersistentShop(clean);
+  } catch (err) {
+    console.error('CRITICAL: Error deleting shop from Firestore:', err);
+  }
   return true;
 }
 

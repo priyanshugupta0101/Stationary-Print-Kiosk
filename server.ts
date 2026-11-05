@@ -21,6 +21,7 @@ import {
 import {
   getAllShops,
   getShopBySlugOrId,
+  getShopBySlugOrIdAsync,
   createShop,
   updateShop,
   toggleShopStatus,
@@ -37,6 +38,8 @@ import {
 import {
   resetFirestoreTestData,
   initFirestoreData,
+  getPersistentShops,
+  getPersistentShopBySlugOrId,
   updatePersistentJobStatus,
   lookupPersistentJob,
 } from './server/firestoreDb.ts';
@@ -170,7 +173,7 @@ export async function createExpressApp() {
       const contactAdmin = getSuperAdminContact();
 
       if (shopSlug) {
-        const tenant = getShopBySlugOrId(shopSlug);
+        const tenant = await getShopBySlugOrIdAsync(shopSlug);
         if (tenant) {
           const { ownerPin, ...publicSettings } = tenant.settings;
           return res.json({
@@ -225,7 +228,7 @@ export async function createExpressApp() {
         });
       }
 
-      const allShops = getAllShops();
+      const allShops = await getPersistentShops();
 
       if (allShops.length === 0) {
         return res.status(404).json({
@@ -235,7 +238,7 @@ export async function createExpressApp() {
       }
 
       // 1. Try to find shop by targetShopSlug if specified
-      let tenant = targetShopSlug ? getShopBySlugOrId(targetShopSlug) : null;
+      let tenant = targetShopSlug ? await getShopBySlugOrIdAsync(targetShopSlug) : null;
 
       // 2. If targetShopSlug is not specified or doesn't match this PIN, search across all shops by PIN
       if (!tenant || String(tenant.settings?.ownerPin || '').trim() !== cleanPin) {
@@ -351,13 +354,13 @@ export async function createExpressApp() {
       const cleanPin = String(pin || '').trim();
 
       if (targetShopSlug) {
-        const tenant = getShopBySlugOrId(targetShopSlug);
+        const tenant = await getShopBySlugOrIdAsync(targetShopSlug);
         if (tenant) {
           const configuredPin = String(tenant.settings.ownerPin || '').trim();
           if (!configuredPin || cleanPin !== configuredPin) {
             return res.status(401).json({ error: 'Unauthorized. Invalid Owner PIN.' });
           }
-          const updated = updateShop(targetShopSlug, { settingsUpdates: newSettings });
+          const updated = await updateShop(targetShopSlug, { settingsUpdates: newSettings });
           return res.json({ success: true, settings: updated?.settings || newSettings });
         }
       }
@@ -431,7 +434,7 @@ export async function createExpressApp() {
 
   app.get('/api/super-admin/shops', async (_req, res) => {
     try {
-      const shops = getAllShops();
+      const shops = await getPersistentShops();
       try {
         const allJobs = await listCloudPrintJobs('all');
         shops.forEach((shop) => {
@@ -455,26 +458,26 @@ export async function createExpressApp() {
     }
   });
 
-  app.post('/api/super-admin/shops', (req, res) => {
+  app.post('/api/super-admin/shops', async (req, res) => {
     try {
-      const newShop = createShop(req.body);
+      const newShop = await createShop(req.body);
       res.status(201).json({ success: true, shop: newShop });
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Failed to create shop' });
     }
   });
 
-  app.get('/api/super-admin/shops/:slugOrId', (req, res) => {
-    const shop = getShopBySlugOrId(req.params.slugOrId);
+  app.get('/api/super-admin/shops/:slugOrId', async (req, res) => {
+    const shop = await getShopBySlugOrIdAsync(req.params.slugOrId);
     if (!shop) {
       return res.status(404).json({ error: 'Shop not found' });
     }
     res.json({ success: true, shop });
   });
 
-  app.put('/api/super-admin/shops/:slugOrId', (req, res) => {
+  app.put('/api/super-admin/shops/:slugOrId', async (req, res) => {
     try {
-      const updated = updateShop(req.params.slugOrId, req.body);
+      const updated = await updateShop(req.params.slugOrId, req.body);
       if (!updated) {
         return res.status(404).json({ error: 'Shop not found' });
       }
@@ -485,10 +488,10 @@ export async function createExpressApp() {
   });
 
   // Enable or Disable / Toggle Shop System Service (Super Admin Master Control)
-  app.post('/api/super-admin/shops/:slugOrId/toggle-status', (req, res) => {
+  app.post('/api/super-admin/shops/:slugOrId/toggle-status', async (req, res) => {
     try {
       const { status, reason } = req.body || {};
-      const updated = toggleShopStatus(req.params.slugOrId, status, reason);
+      const updated = await toggleShopStatus(req.params.slugOrId, status, reason);
       if (!updated) {
         return res.status(404).json({ error: 'Shop not found' });
       }
@@ -507,10 +510,10 @@ export async function createExpressApp() {
   });
 
   // Extend 7-Day Free Trial (e.g. +7 Days)
-  app.post('/api/super-admin/shops/:slugOrId/extend-trial', (req, res) => {
+  app.post('/api/super-admin/shops/:slugOrId/extend-trial', async (req, res) => {
     try {
       const days = Number(req.body?.days) || 7;
-      const updated = extendShopTrial(req.params.slugOrId, days);
+      const updated = await extendShopTrial(req.params.slugOrId, days);
       if (!updated) {
         return res.status(404).json({ error: 'Shop not found' });
       }
@@ -525,10 +528,10 @@ export async function createExpressApp() {
   });
 
   // Convert Trial to Full Active Subscription Plan
-  app.post('/api/super-admin/shops/:slugOrId/convert-plan', (req, res) => {
+  app.post('/api/super-admin/shops/:slugOrId/convert-plan', async (req, res) => {
     try {
       const plan = req.body?.plan || 'starter';
-      const updated = convertShopToFullPlan(req.params.slugOrId, plan);
+      const updated = await convertShopToFullPlan(req.params.slugOrId, plan);
       if (!updated) {
         return res.status(404).json({ error: 'Shop not found' });
       }
@@ -545,7 +548,7 @@ export async function createExpressApp() {
   // Detailed Shop Analytics & Performance Report Data (for PDF Generation)
   app.get('/api/super-admin/shops/:slugOrId/report-data', async (req, res) => {
     try {
-      const shop = getShopBySlugOrId(req.params.slugOrId);
+      const shop = await getShopBySlugOrIdAsync(req.params.slugOrId);
       if (!shop) {
         return res.status(404).json({ error: 'Shop not found' });
       }
@@ -658,8 +661,8 @@ export async function createExpressApp() {
     }
   });
 
-  app.delete('/api/super-admin/shops/:slugOrId', (req, res) => {
-    const success = deleteShop(req.params.slugOrId);
+  app.delete('/api/super-admin/shops/:slugOrId', async (req, res) => {
+    const success = await deleteShop(req.params.slugOrId);
     if (!success) {
       return res.status(404).json({ error: 'Shop not found' });
     }
@@ -669,7 +672,7 @@ export async function createExpressApp() {
   // Seed realistic demo orders for any shop (for Live Showcases to prospective buyers)
   app.post('/api/super-admin/shops/:slugOrId/seed-demo', async (req, res) => {
     const { slugOrId } = req.params;
-    const shop = getShopBySlugOrId(slugOrId);
+    const shop = await getShopBySlugOrIdAsync(slugOrId);
     if (!shop) {
       return res.status(404).json({ error: 'Shop not found' });
     }
@@ -1043,7 +1046,7 @@ export async function createExpressApp() {
         ''
       ).trim();
 
-      const tenantShop = targetShopSlug ? getShopBySlugOrId(targetShopSlug) : null;
+      const tenantShop = targetShopSlug ? await getShopBySlugOrIdAsync(targetShopSlug) : null;
       if (tenantShop && tenantShop.status === 'suspended') {
         return res.status(403).json({
           error: 'THE SUPER ADMIN HAS STOPPED YOUR SERVICE: Document uploads and printing are paused for this shop.',
