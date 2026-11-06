@@ -13,12 +13,12 @@ import {
   orderBy,
   limit,
   writeBatch,
-  DocumentData,
-  Firestore,
+  type DocumentData,
+  type Firestore,
 } from 'firebase/firestore';
 import fs from 'fs';
 import path from 'path';
-import { ShopTenant, ShopSettings, PrintJob } from '../src/types.ts';
+import type { ShopTenant, ShopSettings, PrintJob } from '../src/types.ts';
 import { applyTrialCalculations } from './shopsStore.ts';
 
 // Load config from firebase-applet-config.json
@@ -145,6 +145,15 @@ export async function getPersistentShopBySlugOrId(slugOrId: string): Promise<Sho
     if (!querySnap.empty) {
       return applyTrialCalculations(querySnap.docs[0].data() as ShopTenant);
     }
+
+    // Comprehensive fallback: scan all persistent shops case-insensitively
+    const all = await getPersistentShops();
+    const found = all.find(
+      (s) =>
+        (s.slug && s.slug.toLowerCase() === clean) ||
+        (s.id && s.id.toLowerCase() === clean)
+    );
+    if (found) return applyTrialCalculations(found);
   } catch (err) {
     handleFirestoreError(err, OperationType.GET, `shops/${clean}`);
   }

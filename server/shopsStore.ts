@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { ShopTenant, ShopSettings, ShopPlan } from '../src/types.ts';
+import type { ShopTenant, ShopSettings, ShopPlan } from '../src/types.ts';
 import {
   savePersistentShop,
   deletePersistentShop,
@@ -448,13 +448,26 @@ export async function updateShop(
   }
 
   const shops = loadShopsFromDisk();
-  const index = shops.findIndex(
+  let index = shops.findIndex(
     (s) => s.slug.toLowerCase() === clean || s.id.toLowerCase() === clean
   );
 
-  if (index === -1) return null;
+  let current: ShopTenant;
+  if (index === -1) {
+    // Check Firestore persistence if shop is not in disk cache
+    const persistent = await getShopBySlugOrIdAsync(slugOrId);
+    if (persistent) {
+      shops.push(persistent);
+      index = shops.length - 1;
+      current = persistent;
+    } else {
+      console.warn(`[updateShop] Shop not found on disk or Firestore for: "${slugOrId}"`);
+      return null;
+    }
+  } else {
+    current = shops[index];
+  }
 
-  const current = shops[index];
   const mergedSettings: ShopSettings = {
     ...current.settings,
     ...(updates.settings || {}),
@@ -488,6 +501,7 @@ export async function updateShop(
   const updated: ShopTenant = {
     ...current,
     ...updates,
+    ownerPin: mergedSettings.ownerPin,
     status: newStatus,
     settings: mergedSettings,
     lastActiveAt: new Date().toISOString(),
@@ -502,6 +516,18 @@ export async function updateShop(
     console.error('CRITICAL: Error persisting updated shop to Firestore:', err);
   }
   return updated;
+}
+
+export async function updateShopPin(
+  slugOrId: string,
+  newPin: string
+): Promise<ShopTenant | null> {
+  const cleanPin = String(newPin || '').trim();
+  if (!cleanPin) return null;
+  return updateShop(slugOrId, {
+    ownerPin: cleanPin,
+    settingsUpdates: { ownerPin: cleanPin },
+  });
 }
 
 export async function toggleShopStatus(

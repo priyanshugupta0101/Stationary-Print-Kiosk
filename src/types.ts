@@ -158,6 +158,7 @@ export interface ShopTenant {
   isTrialExpired?: boolean;
   daysLeftInTrial?: number;
   hoursLeftInTrial?: number;
+  ownerPin?: string;
   settings: ShopSettings;
 }
 

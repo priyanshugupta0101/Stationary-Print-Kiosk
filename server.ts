@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+import express, { type Request, type Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
@@ -15,7 +15,7 @@ import {
   updateCloudPrintJobStatus,
   deleteCloudPrintJob,
   getCloudFile,
-  CloudPrintJob,
+  type CloudPrintJob,
   DEFAULT_SHOP_SETTINGS,
 } from './src/db/cloudSqlDb.ts';
 import {
@@ -24,6 +24,7 @@ import {
   getShopBySlugOrIdAsync,
   createShop,
   updateShop,
+  updateShopPin,
   toggleShopStatus,
   extendShopTrial,
   convertShopToFullPlan,
@@ -238,13 +239,16 @@ export async function createExpressApp() {
         });
       }
 
+      // Helper to cleanly extract configured owner PIN
+      const getShopPin = (s: any) => String(s?.settings?.ownerPin || s?.ownerPin || '').trim();
+
       // 1. Try to find shop by targetShopSlug if specified
       let tenant = targetShopSlug ? await getShopBySlugOrIdAsync(targetShopSlug) : null;
 
       // 2. If targetShopSlug is not specified or doesn't match this PIN, search across all shops by PIN
-      if (!tenant || String(tenant.settings?.ownerPin || '').trim() !== cleanPin) {
+      if (!tenant || getShopPin(tenant) !== cleanPin) {
         const pinMatch = allShops.find(
-          (s) => String(s.settings?.ownerPin || '').trim() === cleanPin
+          (s) => getShopPin(s) === cleanPin
         );
         if (pinMatch) {
           tenant = pinMatch;
@@ -279,7 +283,7 @@ export async function createExpressApp() {
         });
       }
 
-      const configuredPin = String(tenant.settings?.ownerPin || '').trim();
+      const configuredPin = getShopPin(tenant);
       if (!configuredPin) {
         return res.status(400).json({
           success: false,
@@ -476,15 +480,41 @@ export async function createExpressApp() {
     res.json({ success: true, shop });
   });
 
-  app.put('/api/super-admin/shops/:slugOrId', async (req, res) => {
+  const handleUpdateShop = async (req: Request, res: Response) => {
     try {
-      const updated = await updateShop(req.params.slugOrId, req.body);
+      const slugOrId = req.params.slugOrId;
+      const updated = await updateShop(slugOrId, req.body);
       if (!updated) {
-        return res.status(404).json({ error: 'Shop not found' });
+        return res.status(404).json({ success: false, error: 'Shop not found' });
       }
       res.json({ success: true, shop: updated });
     } catch (err: any) {
-      res.status(400).json({ error: err.message || 'Failed to update shop' });
+      res.status(400).json({ success: false, error: err.message || 'Failed to update shop' });
+    }
+  };
+
+  app.put('/api/super-admin/shops/:slugOrId', handleUpdateShop);
+  app.post('/api/super-admin/shops/:slugOrId', handleUpdateShop);
+
+  // Dedicated endpoint to update shop Owner PIN
+  app.post('/api/super-admin/shops/:slugOrId/pin', async (req, res) => {
+    try {
+      const pin = String(req.body?.ownerPin || req.body?.pin || '').trim();
+      if (!pin || pin.length < 4) {
+        return res.status(400).json({ success: false, error: 'PIN must be at least 4 digits' });
+      }
+      const updated = await updateShopPin(req.params.slugOrId, pin);
+      if (!updated) {
+        return res.status(404).json({ success: false, error: 'Shop not found' });
+      }
+      res.json({
+        success: true,
+        shop: updated,
+        ownerPin: pin,
+        message: `Owner PIN updated successfully for ${updated.name}`,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || 'Failed to update PIN' });
     }
   });
 
@@ -1879,6 +1909,14 @@ export async function createExpressApp() {
       console.error('Analytics error:', err);
       res.status(500).json({ error: err.message || 'Analytics failed' });
     }
+  });
+
+  // Guaranteed JSON 404 handler for any unmatched API route to prevent HTML fallthrough
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({
+      success: false,
+      error: `API route not found: ${req.method} ${req.originalUrl}`,
+    });
   });
 
   return app;

@@ -38,7 +38,7 @@ export const EditShopModal: React.FC<EditShopModalProps> = ({
   const [enableOnlinePayments, setEnableOnlinePayments] = useState(shop.settings.enableOnlinePayments !== false);
   const [upiId, setUpiId] = useState(shop.settings.upiId || '');
   const [upiPayeeName, setUpiPayeeName] = useState(shop.settings.upiPayeeName || shop.name);
-  const [ownerPin, setOwnerPin] = useState(shop.settings.ownerPin || '');
+  const [ownerPin, setOwnerPin] = useState(shop.settings?.ownerPin || (shop as any).ownerPin || '');
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +47,8 @@ export const EditShopModal: React.FC<EditShopModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!ownerPin.trim() || ownerPin.trim().length < 4) {
+    const cleanPin = ownerPin.trim();
+    if (!cleanPin || cleanPin.length < 4) {
       setError('Please assign a secure 4 to 6 digit Owner PIN for this shop');
       return;
     }
@@ -69,7 +70,7 @@ export const EditShopModal: React.FC<EditShopModalProps> = ({
       isTrial: isTrialPlan,
       trialDurationDays: plan === 'four_day_trial' ? 4 : (plan === 'free_trial' ? 7 : undefined),
       billingCycle: isTrialPlan ? 'trial' : (plan.startsWith('monthly_') ? 'monthly' : 'lifetime'),
-      ownerPin: ownerPin.trim(),
+      ownerPin: cleanPin,
       settingsUpdates: {
         shopName: name,
         tagline,
@@ -89,7 +90,7 @@ export const EditShopModal: React.FC<EditShopModalProps> = ({
         enableOnlinePayments,
         upiId: upiId.trim(),
         upiPayeeName: upiPayeeName.trim() || name,
-        ownerPin: ownerPin.trim(),
+        ownerPin: cleanPin,
         contactPhone: phone,
         contactEmail: email,
         whatsappNumber,
@@ -97,20 +98,73 @@ export const EditShopModal: React.FC<EditShopModalProps> = ({
       },
     };
 
+    const targetSlugOrId = encodeURIComponent((shop.slug || shop.id || '').trim());
+    if (!targetSlugOrId) {
+      setError('Invalid shop identifier');
+      setSaving(false);
+      return;
+    }
+
     try {
-      const res = await fetch(`/api/super-admin/shops/${shop.slug}`, {
+      // 1. Send update request (supports PUT with fallback to POST)
+      let res = await fetch(`/api/super-admin/shops/${targetSlugOrId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
-      if (res.ok && data.success && data.shop) {
+      if (res.status === 405 || res.status === 404) {
+        res = await fetch(`/api/super-admin/shops/${targetSlugOrId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }
+
+      const text = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        console.warn('Non-JSON response from update shop:', text);
+      }
+
+      if (res.ok && data?.success && data?.shop) {
+        // Also ensure dedicated PIN sync
+        try {
+          await fetch(`/api/super-admin/shops/${targetSlugOrId}/pin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ownerPin: cleanPin }),
+          });
+        } catch {
+          // Non-blocking since main update succeeded
+        }
+
         onSaved(data.shop);
         onClose();
-      } else {
-        setError(data.error || 'Failed to update shop');
+        return;
       }
+
+      // If main update failed, try dedicated PIN update before giving up
+      const pinRes = await fetch(`/api/super-admin/shops/${targetSlugOrId}/pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerPin: cleanPin }),
+      });
+      const pinText = await pinRes.text();
+      let pinData: any = null;
+      try {
+        pinData = JSON.parse(pinText);
+      } catch {}
+
+      if (pinRes.ok && pinData?.success && pinData?.shop) {
+        onSaved(pinData.shop);
+        onClose();
+        return;
+      }
+
+      setError(data?.error || pinData?.error || 'Failed to save shop configuration. Please try again.');
     } catch (err: any) {
       setError(err.message || 'Network error saving shop settings');
     } finally {

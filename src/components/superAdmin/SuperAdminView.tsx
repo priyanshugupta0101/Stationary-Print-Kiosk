@@ -965,7 +965,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                             Owner PIN:
                           </span>
                           <span className="font-mono font-black text-xs text-amber-950 dark:text-amber-100 bg-white dark:bg-slate-900 px-2 py-0.5 rounded-md border border-amber-300 dark:border-amber-700">
-                            {shop.settings?.ownerPin || '—'}
+                            {shop.settings?.ownerPin || (shop as any).ownerPin || '—'}
                           </span>
                         </div>
                       </div>
@@ -975,10 +975,10 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                           Assigned PIN
                         </span>
 
-                        {shop.settings?.ownerPin && (
+                        {(shop.settings?.ownerPin || (shop as any).ownerPin) && (
                           <button
                             type="button"
-                            onClick={() => handleCopy(shop.settings.ownerPin, `pin-${shop.id}`)}
+                            onClick={() => handleCopy(shop.settings?.ownerPin || (shop as any).ownerPin, `pin-${shop.id}`)}
                             className="p-1 rounded-md bg-white dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-slate-700 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-slate-600 cursor-pointer"
                             title="Copy Owner PIN"
                           >

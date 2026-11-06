@@ -1,4 +1,4 @@
-import { PrintJob, UploadedFileMeta, CustomerPrintSettings, PricingBreakdown } from '../src/types.ts';
+import type { PrintJob, UploadedFileMeta, CustomerPrintSettings, PricingBreakdown } from '../src/types.ts';
 import { getDemoShop, resetDemoShop } from './shopsStore.ts';
 
 export interface DemoFinancials {
