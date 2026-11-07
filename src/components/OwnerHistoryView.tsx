@@ -17,6 +17,8 @@ import {
 import { PrintJob, ShopSettings, UploadedFileMeta } from '../types';
 import { triggerSystemPrint } from '../utils/printHelper';
 import { FileViewerModal } from './FileViewerModal';
+import { doc, deleteDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 interface OwnerHistoryViewProps {
   shopSettings: ShopSettings | null;
@@ -82,13 +84,25 @@ export const OwnerHistoryView: React.FC<OwnerHistoryViewProps> = ({ shopSettings
       return;
     }
 
+    // Optimistically remove from state for instant responsiveness
+    setJobs((prev) => prev.filter((j) => j.id !== jobId && j.otp !== jobId));
+
     try {
+      // 1. Direct Firestore deletion
+      try {
+        await deleteDoc(doc(db, 'print_jobs', jobId));
+      } catch (fsErr) {
+        console.warn('Firestore direct delete notice:', fsErr);
+      }
+
+      // 2. Server API deletion
       const res = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
       if (res.ok) {
         fetchHistory();
       }
     } catch (err) {
       console.error('Failed to delete job:', err);
+      fetchHistory();
     }
   };
 

@@ -1099,7 +1099,7 @@ export async function createExpressApp() {
   }
 
   // Document Upload Endpoint (Accepts both /api/upload and /api/jobs, supports 'files' or any form field)
-  app.post(['/api/upload', '/api/jobs'], upload.any(), async (req: Request, res: Response) => {
+  app.post(['/api/upload', '/api/upload/', '/api/jobs', '/api/jobs/'], upload.any(), async (req: Request, res: Response) => {
     try {
       const files = (req.files as Express.Multer.File[]) || [];
       if (!files || files.length === 0) {
@@ -1624,7 +1624,7 @@ export async function createExpressApp() {
   });
 
   // Delete a job
-  app.delete('/api/jobs/:id', async (req, res) => {
+  app.delete(['/api/jobs/:id', '/api/jobs/:id/'], async (req, res) => {
     const { id } = req.params;
     try {
       await deleteCloudPrintJob(id);

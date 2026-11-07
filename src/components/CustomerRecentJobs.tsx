@@ -55,8 +55,12 @@ export const CustomerRecentJobs: React.FC<CustomerRecentJobsProps> = ({
       });
 
       if (res.ok) {
-        const data = await res.json();
-        if (data.success && Array.isArray(data.jobs)) {
+        const text = await res.text();
+        let data: any = null;
+        try {
+          data = JSON.parse(text);
+        } catch {}
+        if (data?.success && Array.isArray(data.jobs)) {
           const updated = updateRecentJobStatuses(data.jobs);
           setJobs(updated);
         }

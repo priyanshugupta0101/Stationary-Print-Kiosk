@@ -431,10 +431,38 @@ export async function savePersistentSuperAdminContact(contact: any): Promise<voi
 
 export async function deletePersistentJob(jobId: string): Promise<boolean> {
   try {
-    await deleteDoc(doc(firestoreDb, 'print_jobs', jobId));
+    const directRef = doc(firestoreDb, 'print_jobs', jobId);
+    const snap = await getDoc(directRef);
+    if (snap.exists()) {
+      await deleteDoc(directRef);
+      return true;
+    }
+
+    // Also look up by 'otp' field
+    const qOtp = query(collection(firestoreDb, 'print_jobs'), where('otp', '==', jobId));
+    const snapOtp = await getDocs(qOtp);
+    if (!snapOtp.empty) {
+      for (const d of snapOtp.docs) {
+        await deleteDoc(d.ref);
+      }
+      return true;
+    }
+
+    // Also look up by 'id' field
+    const qId = query(collection(firestoreDb, 'print_jobs'), where('id', '==', jobId));
+    const snapId = await getDocs(qId);
+    if (!snapId.empty) {
+      for (const d of snapId.docs) {
+        await deleteDoc(d.ref);
+      }
+      return true;
+    }
+
+    // Fallback direct delete
+    await deleteDoc(directRef);
     return true;
   } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `print_jobs/${jobId}`);
+    console.warn('Error deleting persistent job:', err);
     return false;
   }
 }

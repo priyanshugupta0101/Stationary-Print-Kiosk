@@ -74,15 +74,20 @@ export const ResetDataModal: React.FC<ResetDataModalProps> = ({
         }),
       });
 
-      const data = await res.json();
-      if (res.ok && data.success) {
+      const text = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(text);
+      } catch {}
+
+      if (res.ok && data?.success) {
         onResetComplete(
           data.message ||
             `Database successfully reset! Removed ${data.deletedJobsCount || 0} test orders. Your system is ready for real shops.`
         );
         onClose();
       } else {
-        setError(data.error || 'Failed to reset test data. Please verify your Super Admin Key.');
+        setError(data?.error || 'Failed to reset test data. Please verify your Super Admin Key.');
       }
     } catch (err: any) {
       setError(err.message || 'Network error while attempting database reset.');

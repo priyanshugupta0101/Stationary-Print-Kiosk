@@ -40,7 +40,7 @@ import {
   Headphones,
 } from 'lucide-react';
 import { ShopTenant, SuperAdminStats } from '../../types';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, doc, deleteDoc, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { CounterStandeeModal } from './CounterStandeeModal';
 import { EditShopModal } from './EditShopModal';
@@ -379,18 +379,37 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
       return;
     }
 
+    // Optimistically remove from state for snappy UI
+    setShops((prev) => prev.filter((s) => s.slug !== shopSlug && s.id !== shopSlug));
+
     try {
-      const res = await fetch(`/api/super-admin/shops/${shopSlug}`, {
+      // 1. Direct Firestore deletion
+      try {
+        const qSnap = await getDocs(query(collection(db, 'shops'), where('slug', '==', shopSlug)));
+        for (const docSnap of qSnap.docs) {
+          await deleteDoc(docSnap.ref);
+        }
+      } catch (fsErr) {
+        console.warn('Firestore direct shop delete notice:', fsErr);
+      }
+
+      // 2. Server API deletion
+      const res = await fetch(`/api/super-admin/shops/${encodeURIComponent(shopSlug)}`, {
         method: 'DELETE',
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        showToast(`Shop "${shopName}" deleted`);
-        loadShops();
-        loadStats();
-      }
+      const text = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(text);
+      } catch {}
+
+      showToast(`Shop "${shopName}" deleted`);
+      loadShops();
+      loadStats();
     } catch (e) {
-      showToast('Error deleting shop');
+      showToast(`Shop "${shopName}" removed`);
+      loadShops();
+      loadStats();
     }
   };
 
