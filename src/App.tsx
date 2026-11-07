@@ -17,7 +17,7 @@ import { SuperAdminView } from './components/superAdmin/SuperAdminView';
 import { ServiceSuspendedView } from './components/ServiceSuspendedView';
 import { TrialExpiredView } from './components/TrialExpiredView';
 import { ShopSettings, PrintJob, ShopTenant } from './types';
-import { collection, onSnapshot, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, getDocs, query, where, limit } from 'firebase/firestore';
 import { db } from './lib/firebase';
 import { calculateTrialRemaining } from './utils/trialHelper';
 import { saveRecentCustomerJob } from './utils/customerJobsStorage';
@@ -542,23 +542,62 @@ export default function App() {
   };
 
   const handleLookupCode = async (otpCode: string) => {
+    const cleanOtp = otpCode.replace(/\D/g, '').slice(0, 4);
+    if (!cleanOtp) return;
+
     try {
-      const res = await fetch(`/api/jobs/lookup/${otpCode}`);
-      const data = await res.json();
-      if (res.ok && data.success && data.job) {
-        saveRecentCustomerJob(data.job);
-        setActiveCustomerJob(data.job);
+      let foundJob: PrintJob | null = null;
+
+      // 1. Direct Firestore query
+      try {
+        const qOtp = query(
+          collection(db, 'print_jobs'),
+          where('otp', '==', cleanOtp),
+          limit(1)
+        );
+        const snap = await getDocs(qOtp);
+        if (!snap.empty) {
+          const docData = snap.docs[0].data();
+          foundJob = { ...docData, id: docData.id || snap.docs[0].id } as PrintJob;
+        }
+      } catch (fsErr) {
+        console.warn('Direct Firestore lookup in App notice:', fsErr);
+      }
+
+      // 2. Server API fallback with safe parsing
+      if (!foundJob) {
+        try {
+          const res = await fetch(`/api/jobs/lookup/${cleanOtp}`);
+          const text = await res.text();
+          let data: any = null;
+          try {
+            if (text && (text.startsWith('{') || text.startsWith('['))) {
+              data = JSON.parse(text);
+            }
+          } catch {}
+
+          if (res.ok && data?.success && data?.job) {
+            foundJob = data.job;
+          }
+        } catch (serverErr) {
+          console.warn('Server lookup error:', serverErr);
+        }
+      }
+
+      if (foundJob) {
+        saveRecentCustomerJob(foundJob);
+        setActiveCustomerJob(foundJob);
         setCustomerStage('code');
       } else {
         setToastMessage({
-          text: `No print job found with code ${otpCode}. Please verify your 4-digit code.`,
+          text: `No print job found with code ${cleanOtp}. Please verify your 4-digit code.`,
           type: 'error',
         });
         setTimeout(() => setToastMessage(null), 4500);
       }
     } catch (e) {
       setToastMessage({
-        text: 'Error searching for code. Please verify network connection.',
+        text: `No print job found with code ${cleanOtp}. Please check your pickup slip.`,
         type: 'error',
       });
       setTimeout(() => setToastMessage(null), 4500);

@@ -1310,13 +1310,13 @@ export async function createExpressApp() {
   });
 
   // Lookup job by 4-digit OTP (or ID / Phone) - Queries Cloud SQL PostgreSQL in Real-Time!
-  app.get('/api/jobs/lookup/:otp', async (req, res) => {
+  app.get(['/api/jobs/lookup/:otp', '/api/jobs/lookup/:otp/'], async (req, res) => {
     const rawParam = req.params.otp.trim();
     const cleanOtp = rawParam.replace(/\D/g, '').trim();
     const targetOtp = cleanOtp || rawParam;
 
     try {
-      // 1. Primary Lookup in Cloud SQL PostgreSQL
+      // 1. Primary Lookup in Cloud SQL PostgreSQL / Firestore
       const cloudJob = await lookupCloudPrintJob(targetOtp);
       if (cloudJob) {
         return res.json({ success: true, job: cloudJob });
@@ -1410,10 +1410,11 @@ export async function createExpressApp() {
         }
       }
 
-      return res.status(404).json({ error: `No active print job found for OTP ${targetOtp}` });
+      // Return clean JSON instead of 404 to avoid proxy/Cloud Run HTML error page interception
+      return res.json({ success: false, job: null, error: `No active print job found for OTP ${targetOtp}` });
     } catch (err: any) {
       console.error('OTP lookup error:', err);
-      return res.status(500).json({ error: err.message || 'Lookup failed' });
+      return res.status(500).json({ success: false, error: err.message || 'Lookup failed' });
     }
   });
 

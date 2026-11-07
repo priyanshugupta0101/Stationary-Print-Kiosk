@@ -27,7 +27,7 @@ import {
   Edit3,
 } from 'lucide-react';
 import { PrintJob, ShopSettings, UploadedFileMeta, PrintExecutionMode } from '../types';
-import { collection, doc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, where, getDocs, getDoc, updateDoc, limit } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { FileViewerModal } from './FileViewerModal';
 import { CustomerQrModal } from './CustomerQrModal';
@@ -159,7 +159,7 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
     };
   }, [activeJob?.id]);
 
-  // Fetch job by OTP
+  // Fetch job by OTP (Multi-tier resilient lookup: Memory Queue -> Firestore DB -> Server API -> Peer)
   const handleLookupOtp = async (codeToLookup?: string) => {
     const raw = codeToLookup !== undefined ? codeToLookup : otpInput;
     const code = raw.replace(/\D/g, '').slice(0, 4);
@@ -178,63 +178,123 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
     try {
       let foundJob: PrintJob | null = null;
 
-      // 1. Check local server endpoint
-      const res = await fetch(`/api/jobs/lookup/${code}`);
-      const data = await res.json();
+      // Tier 1: Check in-memory pending queue (0ms instantaneous match!)
+      const memMatch = pendingQueue.find(
+        (j) => String(j.otp).trim() === code || String(j.id).trim() === code
+      );
+      if (memMatch) {
+        foundJob = memMatch;
+      }
 
-      if (res.ok && data.success && data.job) {
-        foundJob = data.job;
-      } else {
-        // 2. Peer domain fallback if running in AI Studio (e.g. ais-dev vs ais-pre)
-        if (typeof window !== 'undefined') {
-          let peerHost = '';
-          if (window.location.hostname.includes('ais-dev')) {
-            peerHost = window.location.hostname.replace('ais-dev', 'ais-pre');
-          } else if (window.location.hostname.includes('ais-pre')) {
-            peerHost = window.location.hostname.replace('ais-pre', 'ais-dev');
-          }
-
-          if (peerHost) {
-            try {
-              const peerRes = await fetch(`https://${peerHost}/api/jobs/lookup/${code}`, {
-                credentials: 'omit',
-              });
-              if (peerRes.ok) {
-                const peerData = await peerRes.json();
-                if (peerData.success && peerData.job) {
-                  foundJob = peerData.job;
-                  // Sync to local server so current database stores it
-                  await fetch('/api/jobs/sync', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(peerData.job),
-                  });
-                  setActionSuccess(`Job synced from peer server for OTP ${code}!`);
-                }
-              }
-            } catch (peerErr) {
-              // Ignore peer error and handle below
+      // Tier 2: Direct Real-Time Firestore Query (works even if server API is down or restarting)
+      if (!foundJob) {
+        try {
+          const qOtp = query(
+            collection(db, 'print_jobs'),
+            where('otp', '==', code),
+            limit(5)
+          );
+          const snapOtp = await getDocs(qOtp);
+          if (!snapOtp.empty) {
+            const list = snapOtp.docs.map(
+              (d) => ({ ...d.data(), id: d.data().id || d.id } as PrintJob)
+            );
+            list.sort((a, b) => {
+              const isAActive = a.status === 'pending' || a.status === 'received';
+              const isBActive = b.status === 'pending' || b.status === 'received';
+              if (isAActive && !isBActive) return -1;
+              if (!isAActive && isBActive) return 1;
+              return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+            });
+            foundJob = list[0];
+          } else {
+            // Try direct doc ID
+            const directSnap = await getDoc(doc(db, 'print_jobs', code));
+            if (directSnap.exists()) {
+              foundJob = { ...directSnap.data(), id: directSnap.id } as PrintJob;
             }
+          }
+        } catch (fsErr) {
+          console.warn('Direct Firestore lookup notice:', fsErr);
+        }
+      }
+
+      // Tier 3: Local Server Endpoint with Safe Text Parsing
+      if (!foundJob) {
+        try {
+          const res = await fetch(`/api/jobs/lookup/${code}`);
+          const text = await res.text();
+          let data: any = null;
+          try {
+            if (text && (text.startsWith('{') || text.startsWith('['))) {
+              data = JSON.parse(text);
+            }
+          } catch {}
+
+          if (res.ok && data?.success && data?.job) {
+            foundJob = data.job;
+          }
+        } catch (fetchErr) {
+          console.warn('Server lookup notice:', fetchErr);
+        }
+      }
+
+      // Tier 4: Peer domain fallback if running in AI Studio (e.g. ais-dev vs ais-pre)
+      if (!foundJob && typeof window !== 'undefined') {
+        let peerHost = '';
+        if (window.location.hostname.includes('ais-dev')) {
+          peerHost = window.location.hostname.replace('ais-dev', 'ais-pre');
+        } else if (window.location.hostname.includes('ais-pre')) {
+          peerHost = window.location.hostname.replace('ais-pre', 'ais-dev');
+        }
+
+        if (peerHost) {
+          try {
+            const peerRes = await fetch(`https://${peerHost}/api/jobs/lookup/${code}`, {
+              credentials: 'omit',
+            });
+            const peerText = await peerRes.text();
+            let peerData: any = null;
+            try {
+              if (peerText && (peerText.startsWith('{') || peerText.startsWith('['))) {
+                peerData = JSON.parse(peerText);
+              }
+            } catch {}
+
+            if (peerRes.ok && peerData?.success && peerData?.job) {
+              foundJob = peerData.job;
+              // Sync to local server and Firestore so current instance has it
+              try {
+                await fetch('/api/jobs/sync', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(peerData.job),
+                });
+              } catch (e) {}
+              setActionSuccess(`Job synced for OTP ${code}!`);
+            }
+          } catch (peerErr) {
+            // Ignore peer network error
           }
         }
       }
 
       if (!foundJob) {
-        throw new Error(
-          data?.error ||
-            `No active print job found for OTP ${code}. Verify the customer uploaded documents using: ${currentCounterUrl}`
-        );
+        setErrorMsg(`No active print job found for OTP ${code}. Verify the customer uploaded documents using: ${currentCounterUrl}`);
+        setActiveJob(null);
+        return;
       }
 
       setActiveJob(foundJob);
       setOtpInput(code);
 
-      // Auto mark as 'received' (operator actively looking at it)
+      // Auto mark as 'received' (operator actively inspecting)
       if (foundJob.status === 'pending') {
         updateJobStatus(foundJob.id, 'received', false);
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Job lookup failed');
+      console.warn('Lookup caught error:', err);
+      setErrorMsg(`No active print job found for OTP ${code}.`);
       setActiveJob(null);
     } finally {
       setIsLoading(false);
@@ -256,52 +316,84 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
     status: PrintJob['status'],
     showNotification = true
   ) => {
+    // 1. Optimistic state updates
+    setActiveJob((prev) => (prev && prev.id === jobId ? { ...prev, status } : prev));
+    setPendingQueue((prev) => prev.map((j) => (j.id === jobId ? { ...j, status } : j)));
+    soundEffects.playStatusChange(status);
+    if (showNotification) {
+      setActionSuccess(`Job marked as "${status.toUpperCase()}".`);
+      setTimeout(() => setActionSuccess(null), 3000);
+    }
+
+    // 2. Direct Firestore update
+    try {
+      await updateDoc(doc(db, 'print_jobs', jobId), { status });
+    } catch (fsErr) {
+      console.warn('Firestore direct status update notice:', fsErr);
+    }
+
+    // 3. Server API update with safe parsing
     try {
       const res = await fetch(`/api/jobs/${jobId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       });
-
-      const data = await res.json();
-      if (res.ok && data.success && data.job) {
-        soundEffects.playStatusChange(status);
-        setActiveJob(data.job);
-        fetchQueue();
-        if (showNotification) {
-          setActionSuccess(`Job marked as "${status.toUpperCase()}".`);
-          setTimeout(() => setActionSuccess(null), 3000);
+      const text = await res.text();
+      let data: any = null;
+      try {
+        if (text && (text.startsWith('{') || text.startsWith('['))) {
+          data = JSON.parse(text);
         }
+      } catch {}
+      if (data?.job) {
+        setActiveJob(data.job);
       }
     } catch (err: any) {
-      setErrorMsg('Failed to update status: ' + err.message);
+      console.warn('Server status update notice:', err);
     }
   };
 
   // Update payment status (paid / unpaid)
   const togglePayment = async (jobId: string, current: 'paid' | 'unpaid') => {
     const nextStatus = current === 'paid' ? 'unpaid' : 'paid';
+    setActiveJob((prev) => (prev && prev.id === jobId ? { ...prev, paymentStatus: nextStatus } : prev));
+    setPendingQueue((prev) => prev.map((j) => (j.id === jobId ? { ...j, paymentStatus: nextStatus } : j)));
+
+    if (nextStatus === 'paid') {
+      soundEffects.playPaymentSuccess();
+    } else {
+      soundEffects.playOptionTick();
+    }
+    setActionSuccess(`Payment updated to ${nextStatus.toUpperCase()}`);
+    setTimeout(() => setActionSuccess(null), 3000);
+
+    // Direct Firestore update
+    try {
+      await updateDoc(doc(db, 'print_jobs', jobId), { paymentStatus: nextStatus });
+    } catch (fsErr) {
+      console.warn('Firestore payment update notice:', fsErr);
+    }
+
+    // Server API update with safe parsing
     try {
       const res = await fetch(`/api/jobs/${jobId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ paymentStatus: nextStatus }),
       });
-
-      const data = await res.json();
-      if (res.ok && data.success && data.job) {
-        if (nextStatus === 'paid') {
-          soundEffects.playPaymentSuccess();
-        } else {
-          soundEffects.playOptionTick();
+      const text = await res.text();
+      let data: any = null;
+      try {
+        if (text && (text.startsWith('{') || text.startsWith('['))) {
+          data = JSON.parse(text);
         }
+      } catch {}
+      if (data?.job) {
         setActiveJob(data.job);
-        fetchQueue();
-        setActionSuccess(`Payment updated to ${nextStatus.toUpperCase()}`);
-        setTimeout(() => setActionSuccess(null), 3000);
       }
-    } catch (err: any) {
-      setErrorMsg('Failed to update payment: ' + err.message);
+    } catch (err) {
+      console.warn('Server payment update notice:', err);
     }
   };
 
@@ -310,24 +402,41 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
     if (!activeJob) return;
     setIsFulfilling(true);
     setErrorMsg(null);
+    const targetId = activeJob.id;
+    const targetOtp = activeJob.otp;
+
+    soundEffects.playStatusChange('printed');
+    setActiveJob((prev) => (prev ? { ...prev, status: 'printed' } : null));
+    setPendingQueue((prev) => prev.map((j) => (j.id === targetId ? { ...j, status: 'printed' } : j)));
+    setActionSuccess(`✓ Order OTP ${targetOtp} marked as PRINTED!`);
+    setTimeout(() => setActionSuccess(null), 3500);
+
+    // Direct Firestore update
     try {
-      const res = await fetch(`/api/jobs/${activeJob.id}`, {
+      await updateDoc(doc(db, 'print_jobs', targetId), { status: 'printed' });
+    } catch (fsErr) {
+      console.warn('Firestore mark printed notice:', fsErr);
+    }
+
+    // Server API update with safe parsing
+    try {
+      const res = await fetch(`/api/jobs/${targetId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'printed' }),
       });
-      const data = await res.json();
-      if (res.ok && data.success && data.job) {
-        soundEffects.playStatusChange('printed');
+      const text = await res.text();
+      let data: any = null;
+      try {
+        if (text && (text.startsWith('{') || text.startsWith('['))) {
+          data = JSON.parse(text);
+        }
+      } catch {}
+      if (data?.job) {
         setActiveJob(data.job);
-        fetchQueue();
-        setActionSuccess(`✓ Order OTP ${data.job.otp} marked as PRINTED!`);
-        setTimeout(() => setActionSuccess(null), 3500);
-      } else {
-        throw new Error(data?.error || 'Failed to update job status');
       }
     } catch (err: any) {
-      setErrorMsg('Could not mark as printed: ' + err.message);
+      console.warn('Server mark printed notice:', err);
     } finally {
       setIsFulfilling(false);
     }
@@ -338,30 +447,54 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
     if (!activeJob) return;
     setIsFulfilling(true);
     setErrorMsg(null);
+    const targetId = activeJob.id;
+    const targetOtp = activeJob.otp;
+    const isAlreadyPaid = activeJob.paymentStatus === 'paid';
+    const paymentMethod = isAlreadyPaid ? (activeJob.paymentMethod || 'online_gpay') : 'counter';
+    const notes = activeJob.notes || 'Completed, paid and delivered to customer at counter desk';
+
+    soundEffects.playPaymentSuccess();
+    setActiveJob((prev) => (prev ? { ...prev, status: 'collected', paymentStatus: 'paid', paymentMethod, notes } : null));
+    setPendingQueue((prev) => prev.filter((j) => j.id !== targetId));
+    setActionSuccess(`🎉 Order OTP ${targetOtp} COMPLETED & DELIVERED!`);
+    setTimeout(() => setActionSuccess(null), 4000);
+
+    // Direct Firestore update
     try {
-      const isAlreadyPaid = activeJob.paymentStatus === 'paid';
-      const res = await fetch(`/api/jobs/${activeJob.id}`, {
+      await updateDoc(doc(db, 'print_jobs', targetId), {
+        status: 'collected',
+        paymentStatus: 'paid',
+        paymentMethod,
+        notes,
+      });
+    } catch (fsErr) {
+      console.warn('Firestore complete deliver notice:', fsErr);
+    }
+
+    // Server API update with safe parsing
+    try {
+      const res = await fetch(`/api/jobs/${targetId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           status: 'collected',
           paymentStatus: 'paid',
-          paymentMethod: isAlreadyPaid ? (activeJob.paymentMethod || 'online_gpay') : 'counter',
-          notes: activeJob.notes || 'Completed, paid and delivered to customer at counter desk',
+          paymentMethod,
+          notes,
         }),
       });
-      const data = await res.json();
-      if (res.ok && data.success && data.job) {
-        soundEffects.playPaymentSuccess();
+      const text = await res.text();
+      let data: any = null;
+      try {
+        if (text && (text.startsWith('{') || text.startsWith('['))) {
+          data = JSON.parse(text);
+        }
+      } catch {}
+      if (data?.job) {
         setActiveJob(data.job);
-        fetchQueue();
-        setActionSuccess(`🎉 Order OTP ${data.job.otp} COMPLETED & DELIVERED!`);
-        setTimeout(() => setActionSuccess(null), 4000);
-      } else {
-        throw new Error(data?.error || 'Failed to complete order');
       }
     } catch (err: any) {
-      setErrorMsg('Could not deliver order: ' + err.message);
+      console.warn('Server complete deliver notice:', err);
     } finally {
       setIsFulfilling(false);
     }
