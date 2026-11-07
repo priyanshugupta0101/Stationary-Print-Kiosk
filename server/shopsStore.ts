@@ -103,30 +103,32 @@ export function applyTrialCalculations(shop: ShopTenant): ShopTenant {
     shop.plan = shop.trialDurationDays === 4 ? 'four_day_trial' : 'free_trial';
   }
 
-  if (shop.plan === 'four_day_trial') {
-    shop.trialDurationDays = shop.trialDurationDays || 4;
-  } else {
-    shop.trialDurationDays = shop.trialDurationDays || 7;
-  }
+  const durationDays = shop.plan === 'four_day_trial' ? 4 : (shop.trialDurationDays || 7);
+  shop.trialDurationDays = durationDays;
 
   if (!shop.trialStartDate) {
     shop.trialStartDate = shop.createdAt || new Date().toISOString();
   }
 
+  const startMs = new Date(shop.trialStartDate).getTime();
   if (!shop.trialEndsAt) {
-    const startMs = new Date(shop.trialStartDate).getTime();
     shop.trialEndsAt = new Date(
-      startMs + (shop.trialDurationDays || 7) * 24 * 60 * 60 * 1000
+      startMs + durationDays * 24 * 60 * 60 * 1000
     ).toISOString();
   }
 
   const nowMs = Date.now();
   const endMs = new Date(shop.trialEndsAt).getTime();
   const msLeft = endMs - nowMs;
-
   const isExpired = msLeft <= 0;
-  const daysLeft = Math.max(0, Math.ceil(msLeft / (24 * 60 * 60 * 1000)));
-  const hoursLeft = Math.max(0, Math.ceil(msLeft / (60 * 60 * 1000)));
+
+  // Real elapsed days calculation:
+  // If 2 days have passed since trialStartDate on a 4-day plan,
+  // elapsedDays = 2, daysLeft = 4 - 2 = 2 days left.
+  const elapsedMs = Math.max(0, nowMs - startMs);
+  const elapsedDays = Math.floor(elapsedMs / (24 * 60 * 60 * 1000));
+  const daysLeft = isExpired ? 0 : Math.max(0, durationDays - elapsedDays);
+  const hoursLeft = isExpired ? 0 : Math.max(0, Math.ceil(msLeft / (60 * 60 * 1000)));
 
   shop.isTrialExpired = isExpired;
   shop.daysLeftInTrial = daysLeft;
@@ -135,7 +137,7 @@ export function applyTrialCalculations(shop: ShopTenant): ShopTenant {
   if (shop.settings) {
     shop.settings.isTrial = true;
     shop.settings.trialStartDate = shop.trialStartDate;
-    shop.settings.trialDurationDays = shop.trialDurationDays;
+    shop.settings.trialDurationDays = durationDays;
     shop.settings.trialEndsAt = shop.trialEndsAt;
     shop.settings.isTrialExpired = isExpired;
     shop.settings.daysLeftInTrial = daysLeft;
@@ -240,6 +242,17 @@ export function getAllShops(): ShopTenant[] {
   return raw.map((s) => applyTrialCalculations(s));
 }
 
+function matchShop(s: ShopTenant, target: string): boolean {
+  if (!s || !target) return false;
+  const clean = target.trim().toLowerCase();
+  const norm = clean.replace(/[^a-z0-9]/g, '');
+  if (s.id.toLowerCase() === clean || s.slug.toLowerCase() === clean) return true;
+  const sIdNorm = s.id.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const sSlugNorm = s.slug.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const sNameNorm = (s.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return sIdNorm === norm || sSlugNorm === norm || sNameNorm === norm;
+}
+
 export function getShopBySlugOrId(slugOrId: string): ShopTenant | null {
   if (!slugOrId) return null;
   const clean = slugOrId.trim().toLowerCase();
@@ -250,17 +263,13 @@ export function getShopBySlugOrId(slugOrId: string): ShopTenant | null {
   // 1. Check Cloud Firestore in-memory cache
   const cloudShops = getCachedFirestoreShops();
   if (cloudShops && cloudShops.length > 0) {
-    const match = cloudShops.find(
-      (s) => s.slug.toLowerCase() === clean || s.id.toLowerCase() === clean
-    );
+    const match = cloudShops.find((s) => matchShop(s, slugOrId));
     if (match) return applyTrialCalculations(match);
   }
 
   // 2. Check disk cache
   const shops = loadShopsFromDisk();
-  const found = shops.find(
-    (s) => s.slug.toLowerCase() === clean || s.id.toLowerCase() === clean
-  );
+  const found = shops.find((s) => matchShop(s, slugOrId));
   return found ? applyTrialCalculations(found) : null;
 }
 
@@ -448,9 +457,7 @@ export async function updateShop(
   }
 
   const shops = loadShopsFromDisk();
-  let index = shops.findIndex(
-    (s) => s.slug.toLowerCase() === clean || s.id.toLowerCase() === clean
-  );
+  let index = shops.findIndex((s) => matchShop(s, slugOrId));
 
   let current: ShopTenant;
   if (index === -1) {
@@ -498,14 +505,23 @@ export async function updateShop(
     mergedSettings.suspensionReason = updates.suspensionReason;
   }
 
-  const updated: ShopTenant = {
+  // Preserve existing trialStartDate so elapsed days calculation remains consistent and accurate
+  const trialStartDate = updates.trialStartDate || current.trialStartDate;
+  if (trialStartDate) {
+    mergedSettings.trialStartDate = trialStartDate;
+  }
+
+  let updated: ShopTenant = {
     ...current,
     ...updates,
+    trialStartDate: trialStartDate || undefined,
     ownerPin: mergedSettings.ownerPin,
     status: newStatus,
     settings: mergedSettings,
     lastActiveAt: new Date().toISOString(),
   };
+
+  updated = applyTrialCalculations(updated);
 
   shops[index] = updated;
   saveShopsToDisk(shops);

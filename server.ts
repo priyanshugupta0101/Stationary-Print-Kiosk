@@ -482,7 +482,8 @@ export async function createExpressApp() {
 
   const handleUpdateShop = async (req: Request, res: Response) => {
     try {
-      const slugOrId = req.params.slugOrId;
+      const rawSlug = String(req.params.slugOrId || '').trim();
+      const slugOrId = decodeURIComponent(rawSlug);
       const updated = await updateShop(slugOrId, req.body);
       if (!updated) {
         return res.status(404).json({ success: false, error: 'Shop not found' });
@@ -499,11 +500,13 @@ export async function createExpressApp() {
   // Dedicated endpoint to update shop Owner PIN
   app.post('/api/super-admin/shops/:slugOrId/pin', async (req, res) => {
     try {
+      const rawSlug = String(req.params.slugOrId || '').trim();
+      const slugOrId = decodeURIComponent(rawSlug);
       const pin = String(req.body?.ownerPin || req.body?.pin || '').trim();
       if (!pin || pin.length < 4) {
         return res.status(400).json({ success: false, error: 'PIN must be at least 4 digits' });
       }
-      const updated = await updateShopPin(req.params.slugOrId, pin);
+      const updated = await updateShopPin(slugOrId, pin);
       if (!updated) {
         return res.status(404).json({ success: false, error: 'Shop not found' });
       }

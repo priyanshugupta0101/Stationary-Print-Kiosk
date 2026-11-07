@@ -17,8 +17,9 @@ import { SuperAdminView } from './components/superAdmin/SuperAdminView';
 import { ServiceSuspendedView } from './components/ServiceSuspendedView';
 import { TrialExpiredView } from './components/TrialExpiredView';
 import { ShopSettings, PrintJob, ShopTenant } from './types';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, getDocs } from 'firebase/firestore';
 import { db } from './lib/firebase';
+import { calculateTrialRemaining } from './utils/trialHelper';
 import { saveRecentCustomerJob } from './utils/customerJobsStorage';
 import { soundEffects } from './utils/soundEffects';
 import { Lock, AlertCircle, X, ArrowRight, Store, ShieldCheck, AlertOctagon, Clock, Volume2, VolumeX, Sparkles, Zap } from 'lucide-react';
@@ -327,10 +328,14 @@ export default function App() {
         body: JSON.stringify({ pin: cleanPin, shopSlug: activeShopSlug }),
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(text);
+      } catch {}
 
       // Check if user entered Super Admin numeric master PIN 145214 or server returned Super Admin redirect
-      if (data.isSuperAdmin || data.redirect === 'super-admin' || cleanPin === '145214' || cleanPin === 'PRINT145214') {
+      if (data?.isSuperAdmin || data?.redirect === 'super-admin' || cleanPin === '145214' || cleanPin === 'PRINT145214') {
         setShowPinModal(false);
         setPinInput('');
         setPinError(null);
@@ -340,7 +345,7 @@ export default function App() {
       }
 
       // Check if 4-day or 7-day free trial has auto-expired
-      if (data.isTrialExpired || data.shopStatus === 'trial_expired') {
+      if (data?.isTrialExpired || data?.shopStatus === 'trial_expired') {
         setIsOwnerUnlocked(false);
         setShowPinModal(false);
         setCurrentView('owner');
@@ -357,7 +362,7 @@ export default function App() {
       }
 
       // Check if service was stopped/disabled by Super Admin
-      if (res.status === 403 || data.isSuspended || data.shopStatus === 'suspended') {
+      if (res.status === 403 || data?.isSuspended || data?.shopStatus === 'suspended') {
         setIsOwnerUnlocked(false);
         setShowPinModal(false);
         setCurrentView('owner');
@@ -367,13 +372,13 @@ export default function App() {
             status: 'suspended',
             isSuspended: true,
             suspensionReason:
-              data.suspensionReason || data.error || 'THE SUPER ADMIN HAS STOPPED YOUR SERVICE',
+              data?.suspensionReason || data?.error || 'THE SUPER ADMIN HAS STOPPED YOUR SERVICE',
           });
         }
         return;
       }
 
-      if (res.ok && data.success) {
+      if (res.ok && data?.success) {
         setIsOwnerUnlocked(true);
         setShowPinModal(false);
         setCurrentView('owner');
@@ -399,9 +404,94 @@ export default function App() {
         return;
       }
 
-      // Server returned error
+      // Secondary Firestore Direct Fallback: verify PIN directly from Cloud Firestore database
+      try {
+        const snap = await getDocs(collection(db, 'shops'));
+        let matchedShop: ShopTenant | null = null;
+        snap.forEach((docSnap) => {
+          const s = docSnap.data() as ShopTenant;
+          const confPin = String(s.settings?.ownerPin || (s as any).ownerPin || '').trim();
+          if (confPin && confPin === cleanPin) {
+            if (!activeShopSlug || s.slug === activeShopSlug || s.id === activeShopSlug) {
+              matchedShop = s;
+            } else if (!matchedShop) {
+              matchedShop = s;
+            }
+          }
+        });
+
+        if (matchedShop) {
+          const s = matchedShop as ShopTenant;
+          if (s.status === 'suspended') {
+            setIsOwnerUnlocked(false);
+            setShowPinModal(false);
+            setCurrentView('owner');
+            setShopSettings({
+              ...DEFAULT_INITIAL_SETTINGS,
+              ...(s.settings || {}),
+              shopName: s.name || s.settings?.shopName || 'COPY',
+              shopSlug: s.slug,
+              shopId: s.id,
+              status: 'suspended',
+              isSuspended: true,
+              suspensionReason: s.suspensionReason || 'THE SUPER ADMIN HAS STOPPED YOUR SERVICE',
+            });
+            return;
+          }
+
+          const trialCalc = calculateTrialRemaining(s);
+          if (trialCalc.isTrialExpired) {
+            setIsOwnerUnlocked(false);
+            setShowPinModal(false);
+            setCurrentView('owner');
+            setShopSettings({
+              ...DEFAULT_INITIAL_SETTINGS,
+              ...(s.settings || {}),
+              shopName: s.name || s.settings?.shopName || 'COPY',
+              shopSlug: s.slug,
+              shopId: s.id,
+              isTrial: true,
+              isTrialExpired: true,
+              trialDurationDays: trialCalc.totalDurationDays,
+              daysLeftInTrial: 0,
+            });
+            return;
+          }
+
+          // Authorized owner desk access
+          setIsOwnerUnlocked(true);
+          setShowPinModal(false);
+          setCurrentView('owner');
+          setPinInput('');
+          setPinError(null);
+          setActiveShopSlug(s.slug);
+          const resolvedSettings: ShopSettings = {
+            ...DEFAULT_INITIAL_SETTINGS,
+            ...(s.settings || {}),
+            shopName: s.name || s.settings?.shopName || 'COPY',
+            shopSlug: s.slug,
+            shopId: s.id,
+            ownerPin: cleanPin,
+            status: s.status,
+            isSuspended: false,
+            isTrial: s.isTrial,
+            isTrialExpired: false,
+            daysLeftInTrial: trialCalc.daysLeft,
+          };
+          setShopSettings(resolvedSettings);
+          try {
+            localStorage.setItem(`copy_print_shop_settings_${s.slug || 'default'}`, JSON.stringify(resolvedSettings));
+          } catch (e) {}
+          fetchPendingCount(s.slug);
+          return;
+        }
+      } catch (fsErr) {
+        console.warn('Firestore direct PIN check warning:', fsErr);
+      }
+
+      // Display error if neither server nor Firestore matched
       setPinError(
-        data.error ||
+        data?.error ||
         `Incorrect Operator PIN. Please enter your authentic assigned shop PIN.`
       );
     } catch (err: any) {
@@ -414,28 +504,33 @@ export default function App() {
         return;
       }
 
-      // Offline fallback: check cached settings
-      let cachedPin: string | null = null;
+      // Offline fallback: check cached settings or Firestore
       try {
-        const cached =
-          localStorage.getItem(`copy_print_shop_settings_${activeShopSlug}`) ||
-          localStorage.getItem('copy_print_shop_settings');
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (parsed?.ownerPin) {
-            cachedPin = String(parsed.ownerPin).trim();
+        const snap = await getDocs(collection(db, 'shops'));
+        let matchedShop: ShopTenant | null = null;
+        snap.forEach((docSnap) => {
+          const s = docSnap.data() as ShopTenant;
+          const confPin = String(s.settings?.ownerPin || (s as any).ownerPin || '').trim();
+          if (confPin && confPin === cleanPin) {
+            matchedShop = s;
+          }
+        });
+
+        if (matchedShop) {
+          const s = matchedShop as ShopTenant;
+          const trialCalc = calculateTrialRemaining(s);
+          if (!trialCalc.isTrialExpired && s.status !== 'suspended') {
+            setIsOwnerUnlocked(true);
+            setShowPinModal(false);
+            setCurrentView('owner');
+            setPinInput('');
+            setActiveShopSlug(s.slug);
+            return;
           }
         }
       } catch (e) {}
 
-      if (cachedPin && cleanPin === cachedPin) {
-        setIsOwnerUnlocked(true);
-        setShowPinModal(false);
-        setCurrentView('owner');
-        setPinInput('');
-      } else {
-        setPinError('Incorrect Operator PIN. Please enter your authentic assigned shop PIN.');
-      }
+      setPinError('Incorrect Operator PIN. Please enter your authentic assigned shop PIN.');
     }
   };
 

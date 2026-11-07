@@ -50,6 +50,7 @@ import { LiveDemoShowcase } from './LiveDemoShowcase';
 import { DemoModeSandbox } from './DemoModeSandbox';
 import { ResetDataModal } from './ResetDataModal';
 import { generateAndDownloadShopReportPdf } from '../../utils/shopReportPdf';
+import { calculateTrialRemaining } from '../../utils/trialHelper';
 
 interface SuperAdminViewProps {
   onNavigateToCustomer: (shopSlug: string) => void;
@@ -208,10 +209,14 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
           snapshot.forEach((docSnap) => {
             const data = docSnap.data() as ShopTenant;
             if (data && (data.id || data.slug || docSnap.id)) {
+              const trialCalc = calculateTrialRemaining(data);
               liveShops.push({
                 ...data,
                 id: data.id || docSnap.id,
                 slug: data.slug || docSnap.id,
+                daysLeftInTrial: trialCalc.daysLeft,
+                hoursLeftInTrial: trialCalc.hoursLeft,
+                isTrialExpired: trialCalc.isTrialExpired,
               });
             }
           });
@@ -273,13 +278,25 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
     setLoading(true);
     try {
       const res = await fetch('/api/super-admin/shops');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && Array.isArray(data.shops)) {
-          setShops(data.shops);
-          if (data.shops.length > 0 && !activeDemoShop) {
-            setActiveDemoShop(data.shops[0]);
-          }
+      const text = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(text);
+      } catch {}
+
+      if (res.ok && data?.success && Array.isArray(data.shops)) {
+        const mapped = data.shops.map((s: ShopTenant) => {
+          const trialCalc = calculateTrialRemaining(s);
+          return {
+            ...s,
+            daysLeftInTrial: trialCalc.daysLeft,
+            hoursLeftInTrial: trialCalc.hoursLeft,
+            isTrialExpired: trialCalc.isTrialExpired,
+          };
+        });
+        setShops(mapped);
+        if (mapped.length > 0 && !activeDemoShop) {
+          setActiveDemoShop(mapped[0]);
         }
       }
     } catch (e) {
@@ -871,6 +888,8 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
           {/* Shops Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredShops.map((shop) => {
+              const trialInfo = calculateTrialRemaining(shop);
+              const isTrialModel = Boolean(shop.isTrial || shop.plan === 'four_day_trial' || shop.plan === 'free_trial' || shop.status === 'trial');
               const customerLink = `${baseUrl}/?shop=${shop.slug}`;
               const ownerDeskLink = `${baseUrl}/?shop=${shop.slug}&mode=owner`;
 
@@ -901,8 +920,8 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase shrink-0 bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800 animate-pulse">
                           ⛔ SERVICE STOPPED
                         </span>
-                      ) : shop.isTrial || shop.plan === 'four_day_trial' || shop.plan === 'free_trial' || shop.status === 'trial' ? (
-                        shop.isTrialExpired ? (
+                      ) : isTrialModel ? (
+                        trialInfo.isTrialExpired ? (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase shrink-0 bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800 flex items-center space-x-1">
                             <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-ping mr-1" />
                             {shop.plan === 'four_day_trial' ? '4-DAY PLAN EXPIRED' : 'TRIAL EXPIRED'} (0d Left)
@@ -910,7 +929,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                         ) : (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase shrink-0 bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 flex items-center space-x-1">
                             <Clock className="w-3 h-3 text-amber-600 dark:text-amber-400 mr-1" />
-                            {shop.plan === 'four_day_trial' ? '4-DAY PLAN' : '7-DAY TRIAL'}: {shop.daysLeftInTrial ?? (shop.plan === 'four_day_trial' ? 4 : 7)}D LEFT
+                            {shop.plan === 'four_day_trial' ? '4-DAY PLAN' : '7-DAY TRIAL'}: {trialInfo.daysLeft}D LEFT
                           </span>
                         )
                       ) : shop.plan?.startsWith('monthly_') ? (
@@ -1017,10 +1036,10 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                     </div>
 
                     {/* Subscription & Plan System Management Block */}
-                    {shop.isTrial || shop.plan === 'four_day_trial' || shop.plan === 'free_trial' || shop.status === 'trial' ? (
+                    {isTrialModel ? (
                       <div
                         className={`p-3.5 rounded-2xl mb-3 border transition-all ${
-                          shop.isTrialExpired
+                          trialInfo.isTrialExpired
                             ? 'bg-gradient-to-br from-rose-50 to-amber-50 dark:from-rose-950/40 dark:to-amber-950/30 border-rose-300 dark:border-rose-800 text-rose-950 dark:text-rose-200 shadow-xs'
                             : 'bg-gradient-to-br from-indigo-50/80 to-purple-50/60 dark:from-indigo-950/50 dark:to-purple-950/40 border-indigo-200 dark:border-indigo-800 text-indigo-950 dark:text-indigo-200 shadow-xs'
                         }`}
@@ -1029,25 +1048,25 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                           <div className="flex items-center space-x-1.5">
                             <Clock
                               className={`w-3.5 h-3.5 ${
-                                shop.isTrialExpired ? 'text-rose-600 dark:text-rose-400' : 'text-indigo-600 dark:text-yellow-400'
+                                trialInfo.isTrialExpired ? 'text-rose-600 dark:text-rose-400' : 'text-indigo-600 dark:text-yellow-400'
                               }`}
                             />
                             <span className="text-[11px] font-black uppercase tracking-tight">
                               {shop.plan === 'four_day_trial' ? '4-Day Free Plan System' : '7-Day Free Trial System'}
                             </span>
                           </div>
-                          {shop.isTrialExpired ? (
+                          {trialInfo.isTrialExpired ? (
                             <span className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 bg-rose-600 text-white rounded-full">
                               Expired
                             </span>
                           ) : (
                             <span className="text-[10px] font-mono font-extrabold text-indigo-700 dark:text-yellow-400 bg-white dark:bg-slate-800 px-2 py-0.5 rounded-md border border-indigo-200 dark:border-slate-700 shadow-2xs">
-                              {shop.daysLeftInTrial ?? (shop.plan === 'four_day_trial' ? 4 : 7)} Days Left
+                              {trialInfo.daysLeft} Days Left
                             </span>
                           )}
                         </div>
 
-                        {shop.isTrialExpired ? (
+                        {trialInfo.isTrialExpired ? (
                           <div className="bg-white/90 dark:bg-slate-900/90 p-2.5 rounded-xl border border-rose-200 dark:border-rose-800 text-[11px] text-rose-900 dark:text-rose-200 mb-2.5 leading-snug">
                             <span className="font-bold block text-rose-950 dark:text-rose-100 mb-0.5">
                               ⚠️ Auto-Expired: Desk Access Blocked

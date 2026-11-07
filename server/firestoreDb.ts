@@ -121,13 +121,22 @@ export async function getPersistentShops(): Promise<ShopTenant[]> {
 
 export async function getPersistentShopBySlugOrId(slugOrId: string): Promise<ShopTenant | null> {
   if (!slugOrId) return null;
-  const clean = slugOrId.trim().toLowerCase();
+  const clean = slugOrId.trim();
+  const cleanLower = clean.toLowerCase();
+  const norm = cleanLower.replace(/[^a-z0-9]/g, '');
+
+  const isMatch = (s: ShopTenant) => {
+    if (!s) return false;
+    if (s.id === clean || s.id.toLowerCase() === cleanLower || s.slug.toLowerCase() === cleanLower) return true;
+    const sIdNorm = (s.id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const sSlugNorm = (s.slug || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const sNameNorm = (s.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    return sIdNorm === norm || sSlugNorm === norm || sNameNorm === norm;
+  };
 
   // Try memory cache first for instant sub-millisecond response
   if (cachedFirestoreShops) {
-    const found = cachedFirestoreShops.find(
-      (s) => s.slug.toLowerCase() === clean || s.id.toLowerCase() === clean
-    );
+    const found = cachedFirestoreShops.find(isMatch);
     if (found) return applyTrialCalculations(found);
   }
 
@@ -140,19 +149,15 @@ export async function getPersistentShopBySlugOrId(slugOrId: string): Promise<Sho
     }
 
     // Query by slug
-    const q = query(collection(firestoreDb, 'shops'), where('slug', '==', clean), limit(1));
+    const q = query(collection(firestoreDb, 'shops'), where('slug', '==', cleanLower), limit(1));
     const querySnap = await getDocs(q);
     if (!querySnap.empty) {
       return applyTrialCalculations(querySnap.docs[0].data() as ShopTenant);
     }
 
-    // Comprehensive fallback: scan all persistent shops case-insensitively
+    // Comprehensive fallback: scan all persistent shops
     const all = await getPersistentShops();
-    const found = all.find(
-      (s) =>
-        (s.slug && s.slug.toLowerCase() === clean) ||
-        (s.id && s.id.toLowerCase() === clean)
-    );
+    const found = all.find(isMatch);
     if (found) return applyTrialCalculations(found);
   } catch (err) {
     handleFirestoreError(err, OperationType.GET, `shops/${clean}`);

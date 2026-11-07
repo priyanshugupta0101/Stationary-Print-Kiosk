@@ -14,6 +14,8 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { ShopTenant, ShopPlan } from '../../types';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '../../lib/firebase';
 
 interface ShopGeneratorWizardProps {
   onShopCreated: (newShop: ShopTenant) => void;
@@ -90,7 +92,8 @@ export const ShopGeneratorWizard: React.FC<ShopGeneratorWizardProps> = ({
       setError('Please enter a unique URL slug');
       return;
     }
-    if (!ownerPin.trim() || ownerPin.trim().length < 4) {
+    const cleanPin = ownerPin.trim();
+    if (!cleanPin || cleanPin.length < 4) {
       setError('Please provide a secure 4 to 6 digit Operator PIN for this shop');
       return;
     }
@@ -98,20 +101,40 @@ export const ShopGeneratorWizard: React.FC<ShopGeneratorWizardProps> = ({
     setLoading(true);
     setError(null);
 
-    const payload = {
-      name: name.trim(),
+    const id = `shop_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const now = new Date().toISOString();
+    const effectivePlan = isTrial ? (Number(trialDays) === 4 ? 'four_day_trial' : 'free_trial') : plan;
+    const durationDays = isTrial ? (effectivePlan === 'four_day_trial' ? 4 : Number(trialDays) || 7) : undefined;
+    const trialEndsAt = isTrial ? new Date(Date.now() + (durationDays || 4) * 24 * 60 * 60 * 1000).toISOString() : undefined;
+
+    const newShopData: ShopTenant = {
+      id,
       slug: slug.trim().toLowerCase(),
-      ownerName: ownerName.trim(),
+      name: name.trim(),
+      ownerName: ownerName.trim() || 'Store Owner',
       tagline: tagline.trim(),
       phone: phone.trim(),
-      whatsappNumber: (whatsappNumber || phone).trim(),
       email: email.trim(),
+      whatsappNumber: (whatsappNumber || phone).trim(),
       address: address.trim(),
-      plan: isTrial ? (trialDays === 4 ? 'four_day_trial' : 'free_trial') : plan,
+      status: 'active',
+      plan: effectivePlan,
       isTrial,
-      trialDays: isTrial ? Number(trialDays) || 4 : undefined,
-      ownerPin: ownerPin.trim(),
+      trialDurationDays: durationDays,
+      trialDays: durationDays,
+      trialStartDate: isTrial ? now : undefined,
+      trialEndsAt,
+      isTrialExpired: false,
+      daysLeftInTrial: durationDays,
+      hoursLeftInTrial: durationDays ? durationDays * 24 : undefined,
+      createdAt: now,
+      lastActiveAt: now,
+      totalJobsCount: 0,
+      totalRevenue: 0,
+      ownerPin: cleanPin,
       settings: {
+        shopId: id,
+        shopSlug: slug.trim().toLowerCase(),
         shopName: name.trim(),
         tagline: tagline.trim(),
         currency: currency.trim() || '₹',
@@ -124,28 +147,49 @@ export const ShopGeneratorWizard: React.FC<ShopGeneratorWizardProps> = ({
         enableOnlinePayments,
         upiId: upiId.trim(),
         upiPayeeName: (upiPayeeName || name).trim(),
-        ownerPin: ownerPin.trim(),
+        ownerPin: cleanPin,
         contactPhone: phone.trim(),
         contactEmail: email.trim(),
         whatsappNumber: (whatsappNumber || phone).trim(),
         shopAddress: address.trim(),
+        status: 'active',
+        isSuspended: false,
+        isTrial,
+        trialDurationDays: durationDays,
+        trialStartDate: isTrial ? now : undefined,
+        trialEndsAt,
+        daysLeftInTrial: durationDays,
+        isTrialExpired: false,
       },
     };
 
     try {
-      const res = await fetch('/api/super-admin/shops', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      // 1. Write directly to Firestore cloud database (guarantees persistence across devices)
+      await setDoc(doc(db, 'shops', id), JSON.parse(JSON.stringify(newShopData)), { merge: true });
 
-      const data = await res.json();
-      if (res.ok && data.success && data.shop) {
-        onShopCreated(data.shop);
-      } else {
-        setError(data.error || 'Failed to generate shop system');
+      // 2. Background sync to server API with safe response text parsing (avoids Unexpected token 'T' errors)
+      try {
+        const res = await fetch('/api/super-admin/shops', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newShopData),
+        });
+        const text = await res.text();
+        let data: any = null;
+        try {
+          data = JSON.parse(text);
+        } catch {}
+        if (data && data.success && data.shop) {
+          onShopCreated(data.shop);
+          return;
+        }
+      } catch (backendErr) {
+        console.warn('Backend sync warning, Firestore was updated directly:', backendErr);
       }
+
+      onShopCreated(newShopData);
     } catch (err: any) {
+      console.error('Error creating shop:', err);
       setError(err.message || 'Network error while provisioning shop');
     } finally {
       setLoading(false);

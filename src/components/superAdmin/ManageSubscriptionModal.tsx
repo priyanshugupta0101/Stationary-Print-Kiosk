@@ -15,6 +15,8 @@ import {
   Check,
 } from 'lucide-react';
 import { ShopTenant, ShopPlan, BillingCycle } from '../../types';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '../../lib/firebase';
 
 interface ManageSubscriptionModalProps {
   shop: ShopTenant;
@@ -45,7 +47,7 @@ export const ManageSubscriptionModal: React.FC<ManageSubscriptionModalProps> = (
     shop.trialDurationDays === 4 || shop.plan === 'four_day_trial' ? 4 : 7
   );
   const [monthlyDays, setMonthlyDays] = useState<number>(30);
-  const [resetStartDate, setResetStartDate] = useState<boolean>(true);
+  const [resetStartDate, setResetStartDate] = useState<boolean>(false);
   const [updating, setUpdating] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -69,8 +71,9 @@ export const ManageSubscriptionModal: React.FC<ManageSubscriptionModalProps> = (
 
     if (!payload) {
       if (category === 'trial') {
+        const targetPlan = selectedPlan === 'four_day_trial' || selectedPlan === 'free_trial' ? selectedPlan : (trialDays === 4 ? 'four_day_trial' : 'free_trial');
         payload = {
-          plan: selectedPlan === 'four_day_trial' || selectedPlan === 'free_trial' ? selectedPlan : (trialDays === 4 ? 'four_day_trial' : 'free_trial'),
+          plan: targetPlan,
           isTrial: true,
           trialDurationDays: trialDays,
           trialDays,
@@ -95,23 +98,72 @@ export const ManageSubscriptionModal: React.FC<ManageSubscriptionModalProps> = (
     }
 
     try {
-      const res = await fetch(`/api/super-admin/shops/${shop.slug}/subscription`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const isTrialPlan = Boolean(payload.isTrial || payload.plan === 'four_day_trial' || payload.plan === 'free_trial');
+      const targetDurationDays = isTrialPlan ? (payload.trialDurationDays || (payload.plan === 'four_day_trial' ? 4 : 7)) : undefined;
+      const trialStartDate = (payload.resetStartDate || !shop.trialStartDate) ? new Date().toISOString() : shop.trialStartDate;
+      const trialEndsAt = isTrialPlan
+        ? new Date(new Date(trialStartDate).getTime() + (targetDurationDays || 4) * 24 * 60 * 60 * 1000).toISOString()
+        : undefined;
 
-      const data = await res.json();
-      if (res.ok && data.success && data.shop) {
-        setSuccessMsg(`✓ Subscription updated to ${String(payload.plan).replace(/_/g, ' ').toUpperCase()} successfully!`);
-        onUpdated(data.shop);
-        setTimeout(() => {
-          onClose();
-        }, 1200);
-      } else {
-        throw new Error(data.error || 'Failed to update subscription');
+      const updatedShop: ShopTenant = {
+        ...shop,
+        plan: payload.plan,
+        isTrial: isTrialPlan,
+        billingCycle: payload.billingCycle,
+        trialDurationDays: targetDurationDays,
+        trialDays: targetDurationDays,
+        trialStartDate: isTrialPlan ? trialStartDate : undefined,
+        trialEndsAt,
+        isTrialExpired: false,
+        settings: {
+          ...shop.settings,
+          plan: payload.plan,
+          isTrial: isTrialPlan,
+          trialDurationDays: targetDurationDays,
+          trialStartDate: isTrialPlan ? trialStartDate : undefined,
+          trialEndsAt,
+          isTrialExpired: false,
+          isSuspended: false,
+        },
+        lastActiveAt: new Date().toISOString(),
+      };
+
+      // 1. Direct write to Firestore
+      const targetId = shop.id || shop.slug;
+      await setDoc(doc(db, 'shops', targetId), JSON.parse(JSON.stringify(updatedShop)), { merge: true });
+
+      // 2. Background sync to backend with safe response parsing
+      try {
+        const res = await fetch(`/api/super-admin/shops/${encodeURIComponent(shop.slug || shop.id)}/subscription`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const text = await res.text();
+        let data: any = null;
+        try {
+          data = JSON.parse(text);
+        } catch {}
+
+        if (data?.shop) {
+          setSuccessMsg(`✓ Subscription updated to ${String(payload.plan).replace(/_/g, ' ').toUpperCase()} successfully!`);
+          onUpdated(data.shop);
+          setTimeout(() => {
+            onClose();
+          }, 1000);
+          return;
+        }
+      } catch (backendErr) {
+        console.warn('Backend subscription sync warning:', backendErr);
       }
+
+      setSuccessMsg(`✓ Subscription updated to ${String(payload.plan).replace(/_/g, ' ').toUpperCase()} successfully!`);
+      onUpdated(updatedShop);
+      setTimeout(() => {
+        onClose();
+      }, 1000);
     } catch (err: any) {
+      console.error('Error updating subscription:', err);
       setError(err.message || 'Error updating subscription');
     } finally {
       setUpdating(false);

@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { X, Save, Store, CreditCard, DollarSign, Shield, AlertCircle, KeyRound, RefreshCw } from 'lucide-react';
 import { ShopTenant, ShopSettings, ShopStatus, ShopPlan } from '../../types';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '../../lib/firebase';
 
 interface EditShopModalProps {
   shop: ShopTenant;
@@ -57,116 +59,113 @@ export const EditShopModal: React.FC<EditShopModalProps> = ({
     setError(null);
 
     const isTrialPlan = plan === 'four_day_trial' || plan === 'free_trial';
-    const payload = {
-      name,
-      ownerName,
-      tagline,
-      phone,
-      email,
-      whatsappNumber,
-      address,
+    const trialDurationDays = isTrialPlan ? (plan === 'four_day_trial' ? 4 : 7) : undefined;
+    const trialStartDate = shop.trialStartDate || shop.createdAt || new Date().toISOString();
+    const trialEndsAt = isTrialPlan
+      ? (shop.trialEndsAt && shop.trialDurationDays === trialDurationDays
+          ? shop.trialEndsAt
+          : new Date(new Date(trialStartDate).getTime() + (trialDurationDays || 4) * 24 * 60 * 60 * 1000).toISOString())
+      : undefined;
+
+    const updatedSettings: ShopSettings = {
+      ...shop.settings,
+      shopName: name.trim(),
+      tagline: tagline.trim(),
+      currency: currency.trim() || '₹',
+      bwPricePerPage: Number(bwPrice) || 2,
+      colorPricePerPage: Number(colorPrice) || 10,
+      a3Multiplier: Number(a3Multiplier) || 2,
+      doubleSidedDiscountPercent: Number(duplexDiscount) || 10,
+      spiralFee: Number(spiralFee) || 30,
+      stapleFee: Number(stapleFee) || 5,
+      enableOnlinePayments,
+      upiId: upiId.trim(),
+      upiPayeeName: (upiPayeeName || name).trim(),
+      ownerPin: cleanPin,
+      contactPhone: phone.trim(),
+      contactEmail: email.trim(),
+      whatsappNumber: (whatsappNumber || phone).trim(),
+      shopAddress: address.trim(),
+      status,
+      isSuspended: status === 'suspended',
+      suspensionReason: status === 'suspended' ? 'THE SUPER ADMIN HAS STOPPED YOUR SERVICE' : undefined,
+      plan,
+      isTrial: isTrialPlan,
+      trialDurationDays,
+      trialStartDate: isTrialPlan ? trialStartDate : undefined,
+      trialEndsAt,
+      isTrialExpired: false,
+    };
+
+    const updatedShop: ShopTenant = {
+      ...shop,
+      name: name.trim(),
+      ownerName: ownerName.trim(),
+      tagline: tagline.trim(),
+      phone: phone.trim(),
+      email: email.trim(),
+      whatsappNumber: (whatsappNumber || phone).trim(),
+      address: address.trim(),
       status,
       plan,
       isTrial: isTrialPlan,
-      trialDurationDays: plan === 'four_day_trial' ? 4 : (plan === 'free_trial' ? 7 : undefined),
-      billingCycle: isTrialPlan ? 'trial' : (plan.startsWith('monthly_') ? 'monthly' : 'lifetime'),
+      trialDurationDays,
+      trialDays: trialDurationDays,
+      trialStartDate: isTrialPlan ? trialStartDate : undefined,
+      trialEndsAt,
       ownerPin: cleanPin,
-      settingsUpdates: {
-        shopName: name,
-        tagline,
-        status,
-        plan,
-        isTrial: isTrialPlan,
-        trialDurationDays: plan === 'four_day_trial' ? 4 : (plan === 'free_trial' ? 7 : undefined),
-        isSuspended: status === 'suspended',
-        suspensionReason: status === 'suspended' ? 'THE SUPER ADMIN HAS STOPPED YOUR SERVICE' : undefined,
-        currency,
-        bwPricePerPage: Number(bwPrice) || 2,
-        colorPricePerPage: Number(colorPrice) || 10,
-        a3Multiplier: Number(a3Multiplier) || 2,
-        doubleSidedDiscountPercent: Number(duplexDiscount) || 10,
-        spiralFee: Number(spiralFee) || 30,
-        stapleFee: Number(stapleFee) || 5,
-        enableOnlinePayments,
-        upiId: upiId.trim(),
-        upiPayeeName: upiPayeeName.trim() || name,
-        ownerPin: cleanPin,
-        contactPhone: phone,
-        contactEmail: email,
-        whatsappNumber,
-        shopAddress: address,
-      },
+      settings: updatedSettings,
+      lastActiveAt: new Date().toISOString(),
     };
 
-    const targetSlugOrId = encodeURIComponent((shop.slug || shop.id || '').trim());
-    if (!targetSlugOrId) {
-      setError('Invalid shop identifier');
-      setSaving(false);
-      return;
-    }
-
     try {
-      // 1. Send update request (supports PUT with fallback to POST)
-      let res = await fetch(`/api/super-admin/shops/${targetSlugOrId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      // 1. Direct write to real Firestore database (guarantees persistence across devices)
+      const targetDocId = shop.id || shop.slug;
+      await setDoc(doc(db, 'shops', targetDocId), JSON.parse(JSON.stringify(updatedShop)), { merge: true });
 
-      if (res.status === 405 || res.status === 404) {
-        res = await fetch(`/api/super-admin/shops/${targetSlugOrId}`, {
+      // 2. Sync to backend Express server with safe text parsing (never throw Unexpected token 'T')
+      const targetSlugOrId = encodeURIComponent((shop.slug || shop.id || '').trim());
+      try {
+        const payload = {
+          ...updatedShop,
+          settingsUpdates: updatedSettings,
+        };
+
+        const res = await fetch(`/api/super-admin/shops/${targetSlugOrId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-      }
 
-      const text = await res.text();
-      let data: any = null;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        console.warn('Non-JSON response from update shop:', text);
-      }
+        const text = await res.text();
+        let data: any = null;
+        try {
+          data = JSON.parse(text);
+        } catch {}
 
-      if (res.ok && data?.success && data?.shop) {
-        // Also ensure dedicated PIN sync
+        // Dedicated PIN endpoint sync
         try {
           await fetch(`/api/super-admin/shops/${targetSlugOrId}/pin`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ownerPin: cleanPin }),
           });
-        } catch {
-          // Non-blocking since main update succeeded
+        } catch {}
+
+        if (data?.shop) {
+          onSaved(data.shop);
+          onClose();
+          return;
         }
-
-        onSaved(data.shop);
-        onClose();
-        return;
+      } catch (backendErr) {
+        console.warn('Backend sync warning, Firestore was updated directly:', backendErr);
       }
 
-      // If main update failed, try dedicated PIN update before giving up
-      const pinRes = await fetch(`/api/super-admin/shops/${targetSlugOrId}/pin`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ownerPin: cleanPin }),
-      });
-      const pinText = await pinRes.text();
-      let pinData: any = null;
-      try {
-        pinData = JSON.parse(pinText);
-      } catch {}
-
-      if (pinRes.ok && pinData?.success && pinData?.shop) {
-        onSaved(pinData.shop);
-        onClose();
-        return;
-      }
-
-      setError(data?.error || pinData?.error || 'Failed to save shop configuration. Please try again.');
+      onSaved(updatedShop);
+      onClose();
     } catch (err: any) {
-      setError(err.message || 'Network error saving shop settings');
+      console.error('Error saving shop settings:', err);
+      setError(err.message || 'Failed to save shop configuration');
     } finally {
       setSaving(false);
     }
