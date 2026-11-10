@@ -12,6 +12,8 @@ import {
   Crown,
 } from 'lucide-react';
 import { AnalyticsSummary, ShopSettings } from '../types';
+import { collection, onSnapshot } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 interface OwnerAnalyticsViewProps {
   shopSettings: ShopSettings | null;
@@ -42,7 +44,20 @@ export const OwnerAnalyticsView: React.FC<OwnerAnalyticsViewProps> = ({ shopSett
 
   useEffect(() => {
     fetchAnalytics();
-  }, []);
+
+    let unsubscribe: (() => void) | undefined;
+    try {
+      unsubscribe = onSnapshot(collection(db, 'print_jobs'), () => {
+        fetchAnalytics();
+      });
+    } catch (e) {
+      console.warn('Could not attach Firestore analytics listener:', e);
+    }
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [shopSettings?.shopSlug]);
 
   const currency = shopSettings?.currency || '₹';
 

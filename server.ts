@@ -44,6 +44,8 @@ import {
   getPersistentShopBySlugOrId,
   updatePersistentJobStatus,
   lookupPersistentJob,
+  getPersistentSuperAdminContact,
+  savePersistentSuperAdminContact,
 } from './server/firestoreDb.ts';
 import {
   getDemoModeState,
@@ -972,8 +974,12 @@ export async function createExpressApp() {
   });
 
   // Get Super Admin Helpline & Support details
-  app.get('/api/super-admin/contact', (_req, res) => {
+  app.get(['/api/super-admin/contact', '/api/super-admin/contact/'], async (_req, res) => {
     try {
+      const persistent = await getPersistentSuperAdminContact();
+      if (persistent) {
+        return res.json({ success: true, contact: persistent });
+      }
       const contact = getSuperAdminContact();
       res.json({ success: true, contact });
     } catch (err: any) {
@@ -982,25 +988,34 @@ export async function createExpressApp() {
   });
 
   // Update Super Admin Helpline & Support details
-  app.post('/api/super-admin/contact', (req, res) => {
+  const handleUpdateSuperAdminContact = async (req: any, res: any) => {
     const { pin, name, phone, email, whatsappNumber, serviceProviderTitle, customNote } = req.body;
     if (pin && !verifySuperAdminPin(pin)) {
       return res.status(401).json({ success: false, error: 'Unauthorized. Invalid Super Admin PIN.' });
     }
     try {
-      const updated = updateSuperAdminContact({
-        name,
-        phone,
-        email,
-        whatsappNumber,
-        serviceProviderTitle,
-        customNote,
-      });
+      const contactObj = {
+        name: name || '',
+        phone: phone || '',
+        email: email || '',
+        whatsappNumber: whatsappNumber || phone || '',
+        serviceProviderTitle: serviceProviderTitle || 'Platform Service Provider & Super Admin',
+        customNote: customNote || '',
+      };
+      const updated = updateSuperAdminContact(contactObj);
+      try {
+        await savePersistentSuperAdminContact(updated);
+      } catch (fsErr) {
+        console.warn('Persistent contact save notice:', fsErr);
+      }
       res.json({ success: true, contact: updated, message: 'Super admin contact details updated successfully!' });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || 'Failed to update contact' });
     }
-  });
+  };
+
+  app.post(['/api/super-admin/contact', '/api/super-admin/contact/'], handleUpdateSuperAdminContact);
+  app.put(['/api/super-admin/contact', '/api/super-admin/contact/'], handleUpdateSuperAdminContact);
 
   // Download real-world database backup
   app.get('/api/database/backup', (_req, res) => {
@@ -1503,11 +1518,33 @@ export async function createExpressApp() {
       );
 
       if (shop && String(shop) !== 'all') {
-        const cleanShop = String(shop).trim().toLowerCase();
+        const clean = String(shop).trim().toLowerCase();
+        const cleanNorm = clean.replace(/[^a-z0-9]/g, '');
+        let tenantShop: any = null;
+        try {
+          tenantShop = await getPersistentShopBySlugOrId(clean);
+        } catch (e) {}
+
+        const tSlug = tenantShop ? (tenantShop.slug || '').toLowerCase() : '';
+        const tId = tenantShop ? (tenantShop.id || '').toLowerCase() : '';
+        const tSlugNorm = tSlug.replace(/[^a-z0-9]/g, '');
+        const tNameNorm = tenantShop ? (tenantShop.name || '').toLowerCase().replace(/[^a-z0-9]/g, '') : '';
+        const tIdNorm = tId.replace(/[^a-z0-9]/g, '');
+
         jobs = jobs.filter((j) => {
           const sSlug = (j.shopSlug || (j.settings && j.settings.shopSlug) || '').toLowerCase();
           const sId = (j.shopId || (j.settings && j.settings.shopId) || '').toLowerCase();
-          return sSlug === cleanShop || sId === cleanShop;
+          const sSlugNorm = sSlug.replace(/[^a-z0-9]/g, '');
+          const sIdNorm = sId.replace(/[^a-z0-9]/g, '');
+
+          if (sSlug === clean || sId === clean) return true;
+          if (cleanNorm && (sSlugNorm === cleanNorm || sIdNorm === cleanNorm)) return true;
+
+          if (tenantShop) {
+            if (sSlug && (sSlug === tSlug || sSlugNorm === tSlugNorm || sSlugNorm === tNameNorm)) return true;
+            if (sId && (sId === tId || sIdNorm === tIdNorm)) return true;
+          }
+          return false;
         });
       }
 
@@ -1534,7 +1571,7 @@ export async function createExpressApp() {
   // Update job status / payment status (Updates Cloud SQL PostgreSQL)
   app.patch('/api/jobs/:id', async (req, res) => {
     let { id } = req.params;
-    const { status, paymentStatus, paymentMethod, notes } = req.body;
+    const { status, paymentStatus, paymentMethod, notes, shopSlug, shopId } = req.body;
 
     try {
       // If updating a demo job
@@ -1562,23 +1599,22 @@ export async function createExpressApp() {
         }
       }
 
-      let updatedJob = await updatePersistentJobStatus(id, {
+      const patchPayload: any = {
         status,
         paymentStatus,
         paymentMethod,
         notes: combinedNotes,
-      });
+        ...(shopSlug ? { shopSlug } : {}),
+        ...(shopId ? { shopId } : {}),
+      };
+
+      let updatedJob = await updatePersistentJobStatus(id, patchPayload);
 
       if (!updatedJob) {
         // Fallback lookup by id or otp
         const found = await lookupPersistentJob(id);
         if (found) {
-          updatedJob = await updatePersistentJobStatus(found.id, {
-            status,
-            paymentStatus,
-            paymentMethod,
-            notes: combinedNotes,
-          });
+          updatedJob = await updatePersistentJobStatus(found.id, patchPayload);
         }
       }
 
@@ -1738,11 +1774,33 @@ export async function createExpressApp() {
       let allJobs = await listCloudPrintJobs('all');
 
       if (shop && String(shop) !== 'all') {
-        const cleanShop = String(shop).trim().toLowerCase();
+        const clean = String(shop).trim().toLowerCase();
+        const cleanNorm = clean.replace(/[^a-z0-9]/g, '');
+        let tenantShop: any = null;
+        try {
+          tenantShop = await getPersistentShopBySlugOrId(clean);
+        } catch (e) {}
+
+        const tSlug = tenantShop ? (tenantShop.slug || '').toLowerCase() : '';
+        const tId = tenantShop ? (tenantShop.id || '').toLowerCase() : '';
+        const tSlugNorm = tSlug.replace(/[^a-z0-9]/g, '');
+        const tNameNorm = tenantShop ? (tenantShop.name || '').toLowerCase().replace(/[^a-z0-9]/g, '') : '';
+        const tIdNorm = tId.replace(/[^a-z0-9]/g, '');
+
         allJobs = allJobs.filter((j) => {
           const sSlug = (j.shopSlug || (j.settings && j.settings.shopSlug) || '').toLowerCase();
           const sId = (j.shopId || (j.settings && j.settings.shopId) || '').toLowerCase();
-          return sSlug === cleanShop || sId === cleanShop;
+          const sSlugNorm = sSlug.replace(/[^a-z0-9]/g, '');
+          const sIdNorm = sId.replace(/[^a-z0-9]/g, '');
+
+          if (sSlug === clean || sId === clean) return true;
+          if (cleanNorm && (sSlugNorm === cleanNorm || sIdNorm === cleanNorm)) return true;
+
+          if (tenantShop) {
+            if (sSlug && (sSlug === tSlug || sSlugNorm === tSlugNorm || sSlugNorm === tNameNorm)) return true;
+            if (sId && (sId === tId || sIdNorm === tIdNorm)) return true;
+          }
+          return false;
         });
       }
 

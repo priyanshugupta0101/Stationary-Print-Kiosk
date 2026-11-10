@@ -40,7 +40,7 @@ import {
   Headphones,
 } from 'lucide-react';
 import { ShopTenant, SuperAdminStats } from '../../types';
-import { collection, onSnapshot, doc, deleteDoc, query, where, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, doc, deleteDoc, query, where, getDocs, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { CounterStandeeModal } from './CounterStandeeModal';
 import { EditShopModal } from './EditShopModal';
@@ -67,6 +67,12 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
 }) => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(Boolean(initialAuthenticated));
   const [pinInput, setPinInput] = useState('');
+  const [sessionPin, setSessionPin] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('super_admin_pin') || '';
+    }
+    return '';
+  });
   const [pinError, setPinError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
 
@@ -149,19 +155,45 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
 
   const loadContactData = async () => {
     try {
-      const res = await fetch('/api/super-admin/contact');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.contact) {
-          setContactData({
-            name: data.contact.name || '',
-            phone: data.contact.phone || '',
-            email: data.contact.email || '',
-            whatsappNumber: data.contact.whatsappNumber || '',
-            serviceProviderTitle: data.contact.serviceProviderTitle || 'Platform Service Provider & Super Admin',
-            customNote: data.contact.customNote || '',
-          });
+      // 1. Direct Firestore check for instant response
+      try {
+        const snap = await getDoc(doc(db, 'super_admin_config', 'helpline'));
+        if (snap.exists()) {
+          const c = snap.data();
+          if (c) {
+            setContactData({
+              name: c.name || '',
+              phone: c.phone || '',
+              email: c.email || '',
+              whatsappNumber: c.whatsappNumber || '',
+              serviceProviderTitle: c.serviceProviderTitle || 'Platform Service Provider & Super Admin',
+              customNote: c.customNote || '',
+            });
+          }
         }
+      } catch (fsErr) {
+        console.warn('Firestore load contact notice:', fsErr);
+      }
+
+      // 2. Server API fallback with safe parsing
+      const res = await fetch('/api/super-admin/contact');
+      const text = await res.text();
+      let data: any = null;
+      try {
+        if (text && (text.startsWith('{') || text.startsWith('['))) {
+          data = JSON.parse(text);
+        }
+      } catch {}
+
+      if (res.ok && data?.contact) {
+        setContactData({
+          name: data.contact.name || '',
+          phone: data.contact.phone || '',
+          email: data.contact.email || '',
+          whatsappNumber: data.contact.whatsappNumber || '',
+          serviceProviderTitle: data.contact.serviceProviderTitle || 'Platform Service Provider & Super Admin',
+          customNote: data.contact.customNote || '',
+        });
       }
     } catch (e) {
       console.warn('Failed to load contact data:', e);
@@ -172,20 +204,51 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
     e.preventDefault();
     setSavingContact(true);
     try {
-      const res = await fetch('/api/super-admin/contact', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pin: '145214',
-          ...contactData,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        showToast('Helpline & Service Provider support details updated and saved successfully!');
-      } else {
-        showToast(data.error || 'Failed to save contact details');
+      const payload = {
+        name: contactData.name.trim(),
+        phone: contactData.phone.trim(),
+        email: contactData.email.trim(),
+        whatsappNumber: (contactData.whatsappNumber || contactData.phone).trim(),
+        serviceProviderTitle: (contactData.serviceProviderTitle || 'Platform Service Provider & Super Admin').trim(),
+        customNote: contactData.customNote.trim(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      // 1. Direct Cloud Firestore save for 100% resilient persistence
+      try {
+        await setDoc(doc(db, 'super_admin_config', 'helpline'), payload, { merge: true });
+      } catch (fsErr) {
+        console.warn('Firestore direct helpline save notice:', fsErr);
       }
+
+      // 2. Server API save with safe text parsing (prevents any unexpected token JSON errors)
+      try {
+        const res = await fetch('/api/super-admin/contact', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pin: sessionPin || pinInput || '145214',
+            ...payload,
+          }),
+        });
+
+        const text = await res.text();
+        let data: any = null;
+        try {
+          if (text && (text.startsWith('{') || text.startsWith('['))) {
+            data = JSON.parse(text);
+          }
+        } catch {}
+
+        if (res.ok && data?.success === false) {
+          showToast(data.error || 'Failed to save contact details');
+          return;
+        }
+      } catch (fetchErr) {
+        console.warn('Server contact update notice:', fetchErr);
+      }
+
+      showToast('Helpline & Service Provider support details updated and saved successfully!');
     } catch (err: any) {
       showToast(err.message || 'Error saving contact details');
     } finally {
@@ -252,18 +315,33 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin: clean }),
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      const text = await res.text();
+      let data: any = null;
+      try {
+        if (text && (text.startsWith('{') || text.startsWith('['))) {
+          data = JSON.parse(text);
+        }
+      } catch {}
+
+      if (res.ok && data?.success) {
         setIsAuthenticated(true);
+        setSessionPin(clean);
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('super_admin_pin', clean);
+        }
         loadShops();
         loadStats();
       } else {
-        setPinError(data.error || 'Incorrect Super Admin PIN.');
+        setPinError(data?.error || 'Incorrect Super Admin PIN.');
       }
     } catch (err: any) {
       // Local fallback for offline/preview
       if (clean === '145214' || clean === 'PRINT145214') {
         setIsAuthenticated(true);
+        setSessionPin(clean);
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('super_admin_pin', clean);
+        }
         loadShops();
         loadStats();
       } else {

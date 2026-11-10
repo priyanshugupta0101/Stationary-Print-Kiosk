@@ -82,7 +82,9 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
 
   const otpInputRef = useRef<HTMLInputElement>(null);
 
-  const currentCounterUrl = typeof window !== 'undefined' ? window.location.origin : '';
+  const rawOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+  const activeShopSlug = shopSettings?.shopSlug || (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('shop') : '') || '';
+  const currentCounterUrl = activeShopSlug ? `${rawOrigin}/?shop=${encodeURIComponent(activeShopSlug)}` : rawOrigin;
 
   // Fetch pending / active counter queue
   const fetchQueue = async () => {
@@ -325,9 +327,16 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
       setTimeout(() => setActionSuccess(null), 3000);
     }
 
+    const activeSlug = activeShopSlug || shopSettings?.shopSlug;
+    const activeId = shopSettings?.shopId;
+    const shopMeta = {
+      ...(activeSlug ? { shopSlug: activeSlug } : {}),
+      ...(activeId ? { shopId: activeId } : {}),
+    };
+
     // 2. Direct Firestore update
     try {
-      await updateDoc(doc(db, 'print_jobs', jobId), { status });
+      await updateDoc(doc(db, 'print_jobs', jobId), { status, ...shopMeta });
     } catch (fsErr) {
       console.warn('Firestore direct status update notice:', fsErr);
     }
@@ -337,7 +346,7 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
       const res = await fetch(`/api/jobs/${jobId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status, ...shopMeta }),
       });
       const text = await res.text();
       let data: any = null;
@@ -368,9 +377,16 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
     setActionSuccess(`Payment updated to ${nextStatus.toUpperCase()}`);
     setTimeout(() => setActionSuccess(null), 3000);
 
+    const activeSlug = activeShopSlug || shopSettings?.shopSlug;
+    const activeId = shopSettings?.shopId;
+    const shopMeta = {
+      ...(activeSlug ? { shopSlug: activeSlug } : {}),
+      ...(activeId ? { shopId: activeId } : {}),
+    };
+
     // Direct Firestore update
     try {
-      await updateDoc(doc(db, 'print_jobs', jobId), { paymentStatus: nextStatus });
+      await updateDoc(doc(db, 'print_jobs', jobId), { paymentStatus: nextStatus, ...shopMeta });
     } catch (fsErr) {
       console.warn('Firestore payment update notice:', fsErr);
     }
@@ -380,7 +396,7 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
       const res = await fetch(`/api/jobs/${jobId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paymentStatus: nextStatus }),
+        body: JSON.stringify({ paymentStatus: nextStatus, ...shopMeta }),
       });
       const text = await res.text();
       let data: any = null;
@@ -411,9 +427,16 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
     setActionSuccess(`✓ Order OTP ${targetOtp} marked as PRINTED!`);
     setTimeout(() => setActionSuccess(null), 3500);
 
+    const activeSlug = activeShopSlug || shopSettings?.shopSlug;
+    const activeId = shopSettings?.shopId;
+    const shopMeta = {
+      ...(activeSlug ? { shopSlug: activeSlug } : {}),
+      ...(activeId ? { shopId: activeId } : {}),
+    };
+
     // Direct Firestore update
     try {
-      await updateDoc(doc(db, 'print_jobs', targetId), { status: 'printed' });
+      await updateDoc(doc(db, 'print_jobs', targetId), { status: 'printed', ...shopMeta });
     } catch (fsErr) {
       console.warn('Firestore mark printed notice:', fsErr);
     }
@@ -423,7 +446,7 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
       const res = await fetch(`/api/jobs/${targetId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'printed' }),
+        body: JSON.stringify({ status: 'printed', ...shopMeta }),
       });
       const text = await res.text();
       let data: any = null;
@@ -453,8 +476,15 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
     const paymentMethod = isAlreadyPaid ? (activeJob.paymentMethod || 'online_gpay') : 'counter';
     const notes = activeJob.notes || 'Completed, paid and delivered to customer at counter desk';
 
+    const activeSlug = activeShopSlug || shopSettings?.shopSlug;
+    const activeId = shopSettings?.shopId;
+    const shopMeta = {
+      ...(activeSlug ? { shopSlug: activeSlug } : {}),
+      ...(activeId ? { shopId: activeId } : {}),
+    };
+
     soundEffects.playPaymentSuccess();
-    setActiveJob((prev) => (prev ? { ...prev, status: 'collected', paymentStatus: 'paid', paymentMethod, notes } : null));
+    setActiveJob((prev) => (prev ? { ...prev, status: 'collected', paymentStatus: 'paid', paymentMethod, notes, ...shopMeta } : null));
     setPendingQueue((prev) => prev.filter((j) => j.id !== targetId));
     setActionSuccess(`🎉 Order OTP ${targetOtp} COMPLETED & DELIVERED!`);
     setTimeout(() => setActionSuccess(null), 4000);
@@ -466,6 +496,7 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
         paymentStatus: 'paid',
         paymentMethod,
         notes,
+        ...shopMeta,
       });
     } catch (fsErr) {
       console.warn('Firestore complete deliver notice:', fsErr);
@@ -481,6 +512,7 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
           paymentStatus: 'paid',
           paymentMethod,
           notes,
+          ...shopMeta,
         }),
       });
       const text = await res.text();

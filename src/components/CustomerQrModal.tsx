@@ -51,8 +51,9 @@ export const CustomerQrModal: React.FC<CustomerQrModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const rawOrigin = typeof window !== 'undefined' ? window.location.origin : '';
-  const customerUrl = rawOrigin;
-  const ownerUrl = `${customerUrl}?mode=owner`;
+  const shopSlug = shopSettings?.shopSlug || (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('shop') : '') || '';
+  const customerUrl = shopSlug ? `${rawOrigin}/?shop=${encodeURIComponent(shopSlug)}` : rawOrigin;
+  const ownerUrl = shopSlug ? `${rawOrigin}/?shop=${encodeURIComponent(shopSlug)}&mode=owner` : `${rawOrigin}/?mode=owner`;
 
   const effectiveShopName = shopSettings?.shopName || shopName || 'COPY';
   const currency = shopSettings?.currency || '₹';

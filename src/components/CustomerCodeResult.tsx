@@ -18,7 +18,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import QRCode from 'qrcode';
 import confetti from 'canvas-confetti';
 import { PrintJob, ShopSettings } from '../types';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { updateRecentJobPaymentStatus } from '../utils/customerJobsStorage';
 import { soundEffects } from '../utils/soundEffects';
@@ -45,11 +45,39 @@ export const CustomerCodeResult: React.FC<CustomerCodeResultProps> = ({
     isInitiallyPaid ? 'online' : 'counter'
   );
   const [isPaid, setIsPaid] = useState(isInitiallyPaid);
+  const [confirmedPaymentMethod, setConfirmedPaymentMethod] = useState<string>(() => {
+    if (job.paymentMethod) return job.paymentMethod;
+    if (isInitiallyPaid) {
+      const notes = (job.notes || '').toLowerCase();
+      if (notes.includes('cash') || notes.includes('offline') || notes.includes('counter')) return 'counter';
+      return 'online_gpay';
+    }
+    return '';
+  });
   const [isConfirmingPayment, setIsConfirmingPayment] = useState(false);
   const [paymentSuccessMsg, setPaymentSuccessMsg] = useState<string | null>(
     isInitiallyPaid ? 'Payment Confirmed' : null
   );
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
+
+  // Explicit calculation of payment method flags
+  const activeMethod = String(confirmedPaymentMethod || job.paymentMethod || '');
+  const activeNotes = (job.notes || '').toLowerCase();
+  const isCashPayment =
+    activeMethod === 'counter' ||
+    activeMethod.includes('cash') ||
+    activeNotes.includes('cash') ||
+    activeNotes.includes('offline');
+  const isOnlinePayment =
+    !isCashPayment && (
+      activeMethod.includes('online') ||
+      activeMethod.includes('upi') ||
+      activeMethod.includes('gpay') ||
+      activeNotes.includes('online') ||
+      activeNotes.includes('gpay') ||
+      activeNotes.includes('upi') ||
+      isPaid
+    );
 
   const currency = shopSettings?.currency || job.pricing?.currency || '₹';
   const totalPrice = job.pricing?.totalPrice || 10;
@@ -123,15 +151,18 @@ export const CustomerCodeResult: React.FC<CustomerCodeResultProps> = ({
       unsub = onSnapshot(doc(db, 'print_jobs', job.id), (snap) => {
         if (snap.exists()) {
           const data = snap.data() as PrintJob;
-          if (data.paymentStatus === 'paid' && !isPaid) {
+          if (data.paymentStatus === 'paid') {
             setIsPaid(true);
+            const method = data.paymentMethod || 'online_gpay';
+            setConfirmedPaymentMethod(method);
+            const isCash = method === 'counter' || String(method).includes('cash') || (data.notes || '').toLowerCase().includes('cash');
             setPaymentSuccessMsg(
-              data.paymentMethod === 'counter'
+              isCash
                 ? `Payment confirmed in Cash at Counter!`
                 : `Payment confirmed via GPay / UPI!`
             );
-            updateRecentJobPaymentStatus(job.id, 'paid', data.paymentMethod || 'counter');
-            updateRecentJobPaymentStatus(job.otp, 'paid', data.paymentMethod || 'counter');
+            updateRecentJobPaymentStatus(job.id, 'paid', method);
+            updateRecentJobPaymentStatus(job.otp, 'paid', method);
           }
         }
       });
@@ -141,7 +172,7 @@ export const CustomerCodeResult: React.FC<CustomerCodeResultProps> = ({
     return () => {
       if (unsub) unsub();
     };
-  }, [job.id, isPaid]);
+  }, [job.id]);
 
   const copyCode = () => {
     navigator.clipboard.writeText(job.otp);
@@ -165,47 +196,49 @@ export const CustomerCodeResult: React.FC<CustomerCodeResultProps> = ({
   // Confirm Online Payment
   const handleConfirmOnlinePaid = async () => {
     setIsConfirmingPayment(true);
+    const onlineNotes = `Paid online ₹${formattedPrice} via GPay/UPI (${new Date().toLocaleTimeString()})${utrNumber.trim() ? ` [UTR: ${utrNumber.trim()}]` : ''}`;
+    setConfirmedPaymentMethod('online_gpay');
+    setIsPaid(true);
+    setPaymentSuccessMsg(`Payment of ${currency}${formattedPrice} confirmed via GPay / UPI!`);
+    soundEffects.playPaymentSuccess();
+    updateRecentJobPaymentStatus(job.id, 'paid', 'online_gpay');
+    updateRecentJobPaymentStatus(job.otp, 'paid', 'online_gpay');
+
+    // Confetti effect
     try {
-      const res = await fetch(`/api/jobs/${job.id}`, {
+      confetti({
+        particleCount: 70,
+        spread: 75,
+        origin: { y: 0.6 },
+      });
+    } catch (e) {
+      // ignore
+    }
+
+    // Direct Firestore update
+    try {
+      await updateDoc(doc(db, 'print_jobs', job.id), {
+        paymentStatus: 'paid',
+        paymentMethod: 'online_gpay',
+        notes: onlineNotes,
+      });
+    } catch (fsErr) {
+      console.warn('Direct firestore payment update:', fsErr);
+    }
+
+    // Server API update
+    try {
+      await fetch(`/api/jobs/${job.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           paymentStatus: 'paid',
           paymentMethod: 'online_gpay',
-          notes: `Paid online ₹${formattedPrice} via GPay/UPI (${new Date().toLocaleTimeString()})${utrNumber.trim() ? ` [UTR: ${utrNumber.trim()}]` : ''}`,
+          notes: onlineNotes,
         }),
       });
-
-      soundEffects.playPaymentSuccess();
-
-      if (res.ok) {
-        setIsPaid(true);
-        setPaymentSuccessMsg(`Payment of ${currency}${formattedPrice} confirmed via GPay / UPI!`);
-        updateRecentJobPaymentStatus(job.id, 'paid', 'online_gpay');
-        updateRecentJobPaymentStatus(job.otp, 'paid', 'online_gpay');
-
-        // Confetti effect
-        try {
-          confetti({
-            particleCount: 70,
-            spread: 75,
-            origin: { y: 0.6 },
-          });
-        } catch (e) {
-          // ignore
-        }
-      } else {
-        // Fallback local update
-        setIsPaid(true);
-        setPaymentSuccessMsg(`Payment recorded! Show code ${job.otp} at the counter.`);
-        updateRecentJobPaymentStatus(job.id, 'paid', 'online_gpay');
-      }
     } catch (err) {
-      console.warn('Could not sync payment with server, marking locally:', err);
-      soundEffects.playPaymentSuccess();
-      setIsPaid(true);
-      setPaymentSuccessMsg(`Payment recorded! Show code ${job.otp} at the counter.`);
-      updateRecentJobPaymentStatus(job.id, 'paid', 'online_gpay');
+      console.warn('Server payment update notice:', err);
     } finally {
       setIsConfirmingPayment(false);
     }
@@ -214,27 +247,38 @@ export const CustomerCodeResult: React.FC<CustomerCodeResultProps> = ({
   // Confirm Cash Payment at Counter
   const handleConfirmCashPaid = async () => {
     setIsConfirmingPayment(true);
+    const cashNotes = `Paid in Cash at Counter (${currency}${formattedPrice}) (${new Date().toLocaleTimeString()})`;
+    setConfirmedPaymentMethod('counter');
+    setIsPaid(true);
+    setPaymentSuccessMsg(`Payment of ${currency}${formattedPrice} recorded in Cash at Counter!`);
+    soundEffects.playPaymentSuccess();
+    updateRecentJobPaymentStatus(job.id, 'paid', 'counter');
+    updateRecentJobPaymentStatus(job.otp, 'paid', 'counter');
+
+    // Direct Firestore update
     try {
-      const res = await fetch(`/api/jobs/${job.id}`, {
+      await updateDoc(doc(db, 'print_jobs', job.id), {
+        paymentStatus: 'paid',
+        paymentMethod: 'counter',
+        notes: cashNotes,
+      });
+    } catch (fsErr) {
+      console.warn('Direct firestore cash payment update:', fsErr);
+    }
+
+    // Server API update
+    try {
+      await fetch(`/api/jobs/${job.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           paymentStatus: 'paid',
           paymentMethod: 'counter',
-          notes: `Paid in Cash at Counter (${currency}${formattedPrice}) (${new Date().toLocaleTimeString()})`,
+          notes: cashNotes,
         }),
       });
-
-      soundEffects.playPaymentSuccess();
-      setIsPaid(true);
-      setPaymentSuccessMsg(`Payment of ${currency}${formattedPrice} recorded in Cash at Counter!`);
-      updateRecentJobPaymentStatus(job.id, 'paid', 'counter');
-      updateRecentJobPaymentStatus(job.otp, 'paid', 'counter');
     } catch (err) {
-      soundEffects.playPaymentSuccess();
-      setIsPaid(true);
-      setPaymentSuccessMsg(`Payment recorded in Cash at Counter!`);
-      updateRecentJobPaymentStatus(job.id, 'paid', 'counter');
+      console.warn('Server cash payment notice:', err);
     } finally {
       setIsConfirmingPayment(false);
     }
@@ -380,12 +424,12 @@ export const CustomerCodeResult: React.FC<CustomerCodeResultProps> = ({
 
               {isPaid ? (
                 <span className={`inline-flex items-center text-xs font-extrabold px-3 py-1 rounded-full shadow-2xs ${
-                  (job.paymentMethod === 'counter' || (job.notes && (job.notes.toLowerCase().includes('cash') || job.notes.toLowerCase().includes('offline'))))
+                  isCashPayment
                     ? 'text-amber-800 dark:text-amber-300 bg-amber-100 dark:bg-amber-950 border border-amber-300 dark:border-amber-800'
                     : 'text-emerald-800 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950 border border-emerald-300 dark:border-emerald-800'
                 }`}>
                   <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
-                  {(job.paymentMethod === 'counter' || (job.notes && (job.notes.toLowerCase().includes('cash') || job.notes.toLowerCase().includes('offline'))))
+                  {isCashPayment
                     ? `PAID CASH AT COUNTER (${currency}${formattedPrice})`
                     : `PAID DIGITALLY ONLINE (${currency}${formattedPrice})`}
                 </span>
@@ -399,7 +443,7 @@ export const CustomerCodeResult: React.FC<CustomerCodeResultProps> = ({
             {/* If Already Paid: Show exact payment mode receipt banner */}
             {isPaid ? (
               <div className="space-y-3">
-                {(job.paymentMethod === 'counter' || (job.notes && (job.notes.toLowerCase().includes('cash') || job.notes.toLowerCase().includes('offline')))) ? (
+                {isCashPayment ? (
                   <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/40 dark:to-orange-950/30 border-2 border-amber-300 dark:border-amber-700/80 space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2 text-amber-900 dark:text-amber-200">
@@ -897,8 +941,12 @@ export const CustomerCodeResult: React.FC<CustomerCodeResultProps> = ({
                   {currency}{formattedPrice}
                 </span>
                 {isPaid && (
-                  <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 block">
-                    PAID ONLINE ✓
+                  <span className={`text-[10px] font-black block ${
+                    isCashPayment
+                      ? 'text-amber-700 dark:text-amber-400'
+                      : 'text-emerald-600 dark:text-emerald-400'
+                  }`}>
+                    {isCashPayment ? 'PAID IN CASH AT COUNTER ✓' : 'PAID DIGITALLY ONLINE ✓'}
                   </span>
                 )}
               </div>

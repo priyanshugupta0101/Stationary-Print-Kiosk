@@ -35,7 +35,6 @@ export const CustomerRecentJobs: React.FC<CustomerRecentJobsProps> = ({
   const [jobs, setJobs] = useState<PrintJob[]>(() => getRecentCustomerJobs());
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [copiedOtp, setCopiedOtp] = useState<string | null>(null);
-  const [manualCode, setManualCode] = useState('');
 
   const currency = shopSettings?.currency || '₹';
 
@@ -88,16 +87,6 @@ export const CustomerRecentJobs: React.FC<CustomerRecentJobsProps> = ({
     setTimeout(() => setCopiedOtp(null), 2000);
   };
 
-  const handleManualSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    const clean = manualCode.replace(/\D/g, '').slice(0, 4);
-    if (clean.length === 4 && onLookupCode) {
-      soundEffects.playSearchDing();
-      onLookupCode(clean);
-      setManualCode('');
-    }
-  };
-
   const formatTimeAgo = (dateStr: string) => {
     try {
       const date = new Date(dateStr);
@@ -146,7 +135,7 @@ export const CustomerRecentJobs: React.FC<CustomerRecentJobsProps> = ({
           </div>
         </div>
 
-        {/* Action Controls & Manual Code Lookup */}
+        {/* Action Controls */}
         <div className="flex items-center space-x-2 flex-wrap gap-y-2">
           <button
             type="button"
@@ -167,24 +156,6 @@ export const CustomerRecentJobs: React.FC<CustomerRecentJobsProps> = ({
           >
             <span>Clear</span>
           </button>
-
-          <form onSubmit={handleManualSearch} className="flex items-center space-x-1">
-            <input
-              type="text"
-              maxLength={4}
-              value={manualCode}
-              onChange={(e) => setManualCode(e.target.value.replace(/\D/g, ''))}
-              placeholder="Track other 4-digit code..."
-              className="w-36 sm:w-44 px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-slate-100 placeholder-slate-400 outline-none focus:border-indigo-600 dark:focus:border-yellow-400 focus:bg-white dark:focus:bg-slate-900 transition-all text-center tracking-wider"
-            />
-            <button
-              type="submit"
-              disabled={manualCode.length !== 4}
-              className="px-2.5 py-1.5 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 disabled:opacity-40 text-white text-xs font-bold transition-all cursor-pointer"
-            >
-              Track
-            </button>
-          </form>
         </div>
       </div>
 
@@ -283,26 +254,37 @@ export const CustomerRecentJobs: React.FC<CustomerRecentJobsProps> = ({
                   {/* Right: Status & View Slip button */}
                   <div className="flex items-center justify-between md:justify-end space-x-3 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-slate-100 dark:border-slate-800">
                     <div className="text-left md:text-right">
-                      <div className="flex items-center md:justify-end space-x-1.5">
-                        <span className="text-xs sm:text-sm font-black text-slate-900 dark:text-slate-100">
-                          {currency}{job.pricing?.totalPrice?.toFixed(2) || '0.00'}
-                        </span>
-                        <span
-                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                            isPaid
-                              ? (job.paymentMethod?.includes('online') || job.notes?.toLowerCase().includes('online') || job.notes?.toLowerCase().includes('gpay'))
-                                ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
-                                : 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                          }`}
-                        >
-                          {isPaid
-                            ? (job.paymentMethod?.includes('online') || job.notes?.toLowerCase().includes('online') || job.notes?.toLowerCase().includes('gpay')
-                              ? 'Digital Paid ✓'
-                              : 'Cash Paid ✓')
-                            : 'Pay at Desk'}
-                        </span>
-                      </div>
+                      {(() => {
+                        const jMethod = String(job.paymentMethod || '').toLowerCase();
+                        const jNotes = String(job.notes || '').toLowerCase();
+                        const isJobCash =
+                          jMethod === 'counter' ||
+                          jMethod === 'cash' ||
+                          jNotes.includes('cash') ||
+                          jNotes.includes('offline');
+                        return (
+                          <div className="flex items-center md:justify-end space-x-1.5">
+                            <span className="text-xs sm:text-sm font-black text-slate-900 dark:text-slate-100">
+                              {currency}{job.pricing?.totalPrice?.toFixed(2) || '0.00'}
+                            </span>
+                            <span
+                              className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                                isPaid
+                                  ? isJobCash
+                                    ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                                    : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                              }`}
+                            >
+                              {isPaid
+                                ? isJobCash
+                                  ? 'Cash Paid ✓'
+                                  : 'Digital Paid ✓'
+                                : 'Pay at Desk'}
+                            </span>
+                          </div>
+                        );
+                      })()}
                       <span className="inline-flex items-center text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800 mt-1">
                         <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400 mr-1" />
                         Ready Directly

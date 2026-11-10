@@ -17,7 +17,7 @@ import {
 import { PrintJob, ShopSettings, UploadedFileMeta } from '../types';
 import { triggerSystemPrint } from '../utils/printHelper';
 import { FileViewerModal } from './FileViewerModal';
-import { doc, deleteDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
 interface OwnerHistoryViewProps {
@@ -56,7 +56,54 @@ export const OwnerHistoryView: React.FC<OwnerHistoryViewProps> = ({ shopSettings
 
   useEffect(() => {
     fetchHistory();
-  }, [statusFilter]);
+
+    const shopSlugParam = (shopSettings?.shopSlug || (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('shop') : '') || '').toLowerCase();
+    const shopSlugNorm = shopSlugParam.replace(/[^a-z0-9]/g, '');
+    const shopId = (shopSettings?.shopId || '').toLowerCase();
+
+    let unsubscribe: (() => void) | undefined;
+    try {
+      unsubscribe = onSnapshot(collection(db, 'print_jobs'), (snapshot) => {
+        const liveJobs: PrintJob[] = [];
+        snapshot.forEach((docSnap) => {
+          const item = docSnap.data() as PrintJob;
+          if (item && (item.id || item.otp)) {
+            const jSlug = (item.shopSlug || item.settings?.shopSlug || '').toLowerCase();
+            const jId = (item.shopId || item.settings?.shopId || '').toLowerCase();
+            const jSlugNorm = jSlug.replace(/[^a-z0-9]/g, '');
+            const jIdNorm = jId.replace(/[^a-z0-9]/g, '');
+
+            if (shopSlugParam) {
+              const matches =
+                jSlug === shopSlugParam ||
+                jId === shopSlugParam ||
+                (shopSlugNorm && (jSlugNorm === shopSlugNorm || jIdNorm === shopSlugNorm)) ||
+                (shopId && (jId === shopId || jSlug === shopId));
+              if (!matches) return;
+            }
+
+            // Apply status filter if set
+            if (statusFilter !== 'all' && item.status !== statusFilter) {
+              return;
+            }
+
+            liveJobs.push({ ...item, id: item.id || docSnap.id });
+          }
+        });
+
+        liveJobs.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        setJobs(liveJobs);
+      }, (err) => {
+        console.warn('Real-time Firestore history sync notice:', err);
+      });
+    } catch (e) {
+      console.warn('Could not attach Firestore history listener:', e);
+    }
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [statusFilter, shopSettings?.shopSlug, shopSettings?.shopId]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,6 +112,12 @@ export const OwnerHistoryView: React.FC<OwnerHistoryViewProps> = ({ shopSettings
 
   const handleTogglePayment = async (jobId: string, currentStatus: string) => {
     const next = currentStatus === 'paid' ? 'unpaid' : 'paid';
+    setJobs((prev) => prev.map((j) => (j.id === jobId ? { ...j, paymentStatus: next } : j)));
+
+    try {
+      await updateDoc(doc(db, 'print_jobs', jobId), { paymentStatus: next });
+    } catch (e) {}
+
     try {
       const res = await fetch(`/api/jobs/${jobId}`, {
         method: 'PATCH',
