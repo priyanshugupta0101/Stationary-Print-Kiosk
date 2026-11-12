@@ -65,7 +65,16 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
   onNavigateToOwner,
   initialAuthenticated = false,
 }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(Boolean(initialAuthenticated));
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const savedAuth = sessionStorage.getItem('copy_super_admin_authenticated') === 'true';
+      const savedPin = sessionStorage.getItem('super_admin_pin');
+      if (savedAuth || savedPin === '145214' || savedPin === 'PRINT145214' || initialAuthenticated) {
+        return true;
+      }
+    }
+    return Boolean(initialAuthenticated);
+  });
   const [pinInput, setPinInput] = useState('');
   const [sessionPin, setSessionPin] = useState<string>(() => {
     if (typeof window !== 'undefined') {
@@ -328,6 +337,8 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
         setSessionPin(clean);
         if (typeof window !== 'undefined') {
           sessionStorage.setItem('super_admin_pin', clean);
+          sessionStorage.setItem('copy_super_admin_authenticated', 'true');
+          sessionStorage.setItem('copy_current_view', 'super-admin');
         }
         loadShops();
         loadStats();
@@ -341,6 +352,8 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
         setSessionPin(clean);
         if (typeof window !== 'undefined') {
           sessionStorage.setItem('super_admin_pin', clean);
+          sessionStorage.setItem('copy_super_admin_authenticated', 'true');
+          sessionStorage.setItem('copy_current_view', 'super-admin');
         }
         loadShops();
         loadStats();
@@ -350,6 +363,17 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
     } finally {
       setVerifying(false);
     }
+  };
+
+  const handleSuperAdminLogout = () => {
+    setIsAuthenticated(false);
+    setSessionPin('');
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('copy_super_admin_authenticated');
+      sessionStorage.removeItem('super_admin_pin');
+      sessionStorage.setItem('copy_current_view', 'upload');
+    }
+    onNavigateToCustomer('');
   };
 
   const loadShops = async () => {
@@ -745,6 +769,16 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
               title="Refresh Fleet Data"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSuperAdminLogout}
+              className="flex items-center space-x-1.5 px-3.5 py-3 bg-white/10 hover:bg-rose-600/80 text-white rounded-2xl transition-colors cursor-pointer text-xs font-bold"
+              title="Log Out Super Admin"
+            >
+              <Power className="w-4 h-4 text-rose-300" />
+              <span>Log Out</span>
             </button>
           </div>
         </div>

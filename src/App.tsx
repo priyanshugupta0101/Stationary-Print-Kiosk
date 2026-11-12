@@ -25,24 +25,54 @@ import { soundEffects } from './utils/soundEffects';
 import { Lock, AlertCircle, X, ArrowRight, Store, ShieldCheck, AlertOctagon, Clock, Volume2, VolumeX, Sparkles, Zap } from 'lucide-react';
 
 export default function App() {
-  // Support active shop slug (from ?shop= query param or default empty)
+  // Support active shop slug (from ?shop= query param, sessionStorage, or default empty)
   const initialShopSlug = typeof window !== 'undefined'
-    ? new URLSearchParams(window.location.search).get('shop') || ''
+    ? new URLSearchParams(window.location.search).get('shop') || sessionStorage.getItem('copy_active_shop_slug') || ''
     : '';
 
   const [activeShopSlug, setActiveShopSlug] = useState<string>(initialShopSlug);
-  const [currentView, setCurrentView] = useState<AppNavView>('upload');
+  const [currentView, setCurrentView] = useState<AppNavView>(() => {
+    if (typeof window !== 'undefined') {
+      const mode = new URLSearchParams(window.location.search).get('mode');
+      if (mode === 'super-admin') return 'super-admin';
+      if (mode === 'owner') return 'owner';
+      if (mode === 'direct-send' || mode === 'whatsapp' || mode === 'email') return 'direct-send';
+      const saved = sessionStorage.getItem('copy_current_view');
+      if (saved === 'owner' || saved === 'super-admin' || saved === 'direct-send' || saved === 'upload') {
+        return saved as AppNavView;
+      }
+    }
+    return 'upload';
+  });
   const [customerStage, setCustomerStage] = useState<'upload' | 'code'>('upload');
   const [activeCustomerJob, setActiveCustomerJob] = useState<PrintJob | null>(null);
 
   // Owner state: dedicated pages for different tasks
-  const [ownerSubTab, setOwnerSubTab] = useState<'desk' | 'history' | 'analytics' | 'settings'>('desk');
-  const [isOwnerUnlocked, setIsOwnerUnlocked] = useState(false);
+  const [ownerSubTab, setOwnerSubTab] = useState<'desk' | 'history' | 'analytics' | 'settings'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = sessionStorage.getItem('copy_owner_sub_tab');
+      if (saved === 'desk' || saved === 'history' || saved === 'analytics' || saved === 'settings') {
+        return saved;
+      }
+    }
+    return 'desk';
+  });
+  const [isOwnerUnlocked, setIsOwnerUnlocked] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('copy_owner_unlocked') === 'true';
+    }
+    return false;
+  });
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'info' | 'error' | 'success' } | null>(null);
-  const [isSuperAdminAuthenticated, setIsSuperAdminAuthenticated] = useState<boolean>(false);
+  const [isSuperAdminAuthenticated, setIsSuperAdminAuthenticated] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('copy_super_admin_authenticated') === 'true';
+    }
+    return false;
+  });
 
   // Default Clean Shop Settings for COPY platform
   const DEFAULT_INITIAL_SETTINGS: ShopSettings = {
@@ -259,13 +289,19 @@ export default function App() {
       const urlShop = params.get('shop');
       if (urlShop && urlShop !== activeShopSlug) {
         setActiveShopSlug(urlShop);
+        sessionStorage.setItem('copy_active_shop_slug', urlShop);
       }
 
       const mode = params.get('mode');
       if (mode === 'super-admin') {
         setCurrentView('super-admin');
       } else if (mode === 'owner') {
-        setShowPinModal(true);
+        const unlocked = sessionStorage.getItem('copy_owner_unlocked') === 'true' || isOwnerUnlocked;
+        if (!unlocked) {
+          setShowPinModal(true);
+        } else {
+          setCurrentView('owner');
+        }
       } else if (mode === 'direct-send' || mode === 'whatsapp' || mode === 'email') {
         setCurrentView('direct-send');
       } else if (mode === 'upload' || mode === 'customer') {
@@ -280,6 +316,19 @@ export default function App() {
     };
   }, [activeShopSlug]);
 
+  // Keep authenticated sessions and active tabs persistent across page reloads
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('copy_current_view', currentView);
+      sessionStorage.setItem('copy_owner_sub_tab', ownerSubTab);
+      sessionStorage.setItem('copy_owner_unlocked', isOwnerUnlocked ? 'true' : 'false');
+      sessionStorage.setItem('copy_super_admin_authenticated', isSuperAdminAuthenticated ? 'true' : 'false');
+      if (activeShopSlug) {
+        sessionStorage.setItem('copy_active_shop_slug', activeShopSlug);
+      }
+    }
+  }, [currentView, ownerSubTab, isOwnerUnlocked, isSuperAdminAuthenticated, activeShopSlug]);
+
   const handleSelectView = (view: AppNavView) => {
     if (view === 'upload') {
       setCustomerStage('upload');
@@ -290,7 +339,7 @@ export default function App() {
         setCurrentView('owner');
         return;
       }
-      if (!isOwnerUnlocked) {
+      if (!isOwnerUnlocked && sessionStorage.getItem('copy_owner_unlocked') !== 'true') {
         setShowPinModal(true);
         setPinError(null);
         return;
@@ -303,6 +352,8 @@ export default function App() {
     setIsOwnerUnlocked(false);
     setCurrentView('upload');
     if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('copy_owner_unlocked');
+      sessionStorage.setItem('copy_current_view', 'upload');
       const url = new URL(window.location.href);
       if (url.searchParams.has('mode')) {
         url.searchParams.delete('mode');
@@ -341,6 +392,11 @@ export default function App() {
         setPinError(null);
         setIsSuperAdminAuthenticated(true);
         setCurrentView('super-admin');
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('copy_super_admin_authenticated', 'true');
+          sessionStorage.setItem('copy_current_view', 'super-admin');
+          sessionStorage.setItem('super_admin_pin', cleanPin);
+        }
         return;
       }
 
@@ -385,6 +441,13 @@ export default function App() {
         setPinInput('');
 
         const effectiveSlug = data.shopSlug || data.settings?.shopSlug || activeShopSlug;
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('copy_owner_unlocked', 'true');
+          sessionStorage.setItem('copy_current_view', 'owner');
+          if (effectiveSlug) {
+            sessionStorage.setItem('copy_active_shop_slug', effectiveSlug);
+          }
+        }
         if (effectiveSlug) {
           setActiveShopSlug(effectiveSlug);
           if (typeof window !== 'undefined' && window.history?.pushState) {
@@ -465,6 +528,13 @@ export default function App() {
           setPinInput('');
           setPinError(null);
           setActiveShopSlug(s.slug);
+          if (typeof window !== 'undefined') {
+            sessionStorage.setItem('copy_owner_unlocked', 'true');
+            sessionStorage.setItem('copy_current_view', 'owner');
+            if (s.slug) {
+              sessionStorage.setItem('copy_active_shop_slug', s.slug);
+            }
+          }
           const resolvedSettings: ShopSettings = {
             ...DEFAULT_INITIAL_SETTINGS,
             ...(s.settings || {}),

@@ -6,6 +6,12 @@
  * 2. Manual System Print: Opens the OS native print dialog or external viewer for detailed manual tweaking.
  */
 
+export type PrinterMachineProfile =
+  | 'machine_1_normal'
+  | 'machine_2_glossy'
+  | 'machine_3_heavy'
+  | 'machine_os_dialog';
+
 export interface AutoPrintOptions {
   orientation?: 'portrait' | 'landscape';
   scale?: 'fit' | 'original';
@@ -13,6 +19,8 @@ export interface AutoPrintOptions {
   paperSize?: 'A4' | 'A3' | 'Letter' | 'Legal';
   rotation?: number; // 0, 90, 180, 270
   copies?: number;
+  printerMachineProfile?: PrinterMachineProfile;
+  machineLabel?: string;
 }
 
 /**
@@ -34,6 +42,23 @@ export function triggerAutoPrint(
       const paperSize = options.paperSize || 'A4';
       const rotation = options.rotation || 0;
       const copies = Math.max(1, options.copies || 1);
+
+      const tagPrefix = options.machineLabel
+        ? `[${options.machineLabel}] `
+        : options.printerMachineProfile === 'machine_2_glossy'
+        ? '[GLOSSY PHOTO FRAME] '
+        : options.printerMachineProfile === 'machine_3_heavy'
+        ? '[HEAVY CARDSTOCK] '
+        : options.printerMachineProfile === 'machine_1_normal'
+        ? '[DOC LASER A4] '
+        : '';
+
+      const pageMargin =
+        options.printerMachineProfile === 'machine_2_glossy'
+          ? '0mm'
+          : scale === 'fit'
+          ? '8mm'
+          : '0mm';
 
       const isImage =
         Boolean(mimeType?.startsWith('image/')) ||
@@ -69,11 +94,11 @@ export function triggerAutoPrint(
 <html>
   <head>
     <meta charset="utf-8">
-    <title>Auto Print - ${escapeHtml(originalName)}</title>
+    <title>${escapeHtml(tagPrefix + originalName)}</title>
     <style>
       @page {
         size: ${paperSize} ${orientation};
-        margin: ${scale === 'fit' ? '8mm' : '0mm'};
+        margin: ${pageMargin};
       }
       * {
         box-sizing: border-box;

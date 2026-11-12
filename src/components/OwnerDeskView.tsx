@@ -25,13 +25,17 @@ import {
   Zap,
   SlidersHorizontal,
   Edit3,
+  HelpCircle,
+  Info,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { PrintJob, ShopSettings, UploadedFileMeta, PrintExecutionMode } from '../types';
 import { collection, doc, onSnapshot, query, where, getDocs, getDoc, updateDoc, limit } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { FileViewerModal } from './FileViewerModal';
 import { CustomerQrModal } from './CustomerQrModal';
-import { triggerSystemPrint, triggerAutoPrint, AutoPrintOptions } from '../utils/printHelper';
+import { MultiPrinterGuideModal } from './MultiPrinterGuideModal';
+import { triggerSystemPrint, triggerAutoPrint, AutoPrintOptions, PrinterMachineProfile } from '../utils/printHelper';
 import { soundEffects } from '../utils/soundEffects';
 
 interface OwnerDeskViewProps {
@@ -52,6 +56,25 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
   // Print execution mode: Automatic vs Manual
   const [printMode, setPrintMode] = useState<PrintExecutionMode>('automatic');
 
+  // Target Hardware Printer Machine Profile (Normal Document vs Glossy Photo vs Heavy Media)
+  const [printerProfile, setPrinterProfile] = useState<PrinterMachineProfile>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = sessionStorage.getItem('copy_printer_profile');
+      if (
+        saved === 'machine_1_normal' ||
+        saved === 'machine_2_glossy' ||
+        saved === 'machine_3_heavy' ||
+        saved === 'machine_os_dialog'
+      ) {
+        return saved;
+      }
+    }
+    return 'machine_1_normal';
+  });
+
+  // Multi-Printer & Kiosk Mode Guide Modal
+  const [isPrinterGuideOpen, setIsPrinterGuideOpen] = useState(false);
+
   // Pre-configured Machine Print Settings (For Automatic Direct Print)
   const [autoSettings, setAutoSettings] = useState<{
     orientation: 'portrait' | 'landscape';
@@ -68,6 +91,27 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
     rotation: 0,
     copies: 1,
   });
+
+  // Handle Switching Target Printer Machine Profile
+  const handleSelectPrinterProfile = (profile: PrinterMachineProfile) => {
+    setPrinterProfile(profile);
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('copy_printer_profile', profile);
+    }
+    if (profile === 'machine_1_normal') {
+      setAutoSettings((prev) => ({ ...prev, colorMode: 'bw', scale: 'fit', paperSize: 'A4' }));
+      setActionSuccess('Target: Machine 1 (Document Laser A4 - B&W Plain Paper & 8mm Margin)');
+    } else if (profile === 'machine_2_glossy') {
+      setAutoSettings((prev) => ({ ...prev, colorMode: 'color', scale: 'original', paperSize: 'A4' }));
+      setActionSuccess('Target: Machine 2 (Glossy Photo & Frame - Full Color & 0mm Borderless)');
+    } else if (profile === 'machine_3_heavy') {
+      setAutoSettings((prev) => ({ ...prev, colorMode: 'color', scale: 'fit' }));
+      setActionSuccess('Target: Machine 3 (Heavy Cardstock / Thick Certificate Media)');
+    } else {
+      setActionSuccess('Target: Prompt OS Dialog (Choose Hardware Destination)');
+    }
+    setTimeout(() => setActionSuccess(null), 3500);
+  };
 
   // QR Code Modal for two-device / customer mobile upload
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
@@ -549,8 +593,20 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
   // Print single file: Automatic (Direct machine output) vs Manual (OS settings)
   const handlePrintFile = async (file: UploadedFileMeta) => {
     if (printMode === 'automatic') {
-      setActionSuccess(`⚡ Auto-Printing ${file.originalName} with pre-set machine layout (${autoSettings.paperSize} ${autoSettings.orientation})...`);
-      await triggerAutoPrint(file.url, file.originalName, file.mimeType, autoSettings);
+      const machineLabel =
+        printerProfile === 'machine_1_normal'
+          ? 'Machine 1 (Doc Laser)'
+          : printerProfile === 'machine_2_glossy'
+          ? 'Machine 2 (Glossy Photo Frame)'
+          : printerProfile === 'machine_3_heavy'
+          ? 'Machine 3 (Heavy Stock)'
+          : 'OS Spooler';
+      setActionSuccess(`⚡ Auto-Printing ${file.originalName} to ${machineLabel}...`);
+      await triggerAutoPrint(file.url, file.originalName, file.mimeType, {
+        ...autoSettings,
+        printerMachineProfile: printerProfile,
+        machineLabel,
+      });
       soundEffects.playPaymentSuccess();
       if (activeJob) {
         updateJobStatus(activeJob.id, 'printed');
@@ -567,10 +623,22 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
   const handlePrintAll = async () => {
     if (!activeJob || activeJob.files.length === 0) return;
     if (printMode === 'automatic') {
-      setActionSuccess(`⚡ Auto-Printing all ${activeJob.files.length} documents directly...`);
+      const machineLabel =
+        printerProfile === 'machine_1_normal'
+          ? 'Machine 1 (Doc Laser)'
+          : printerProfile === 'machine_2_glossy'
+          ? 'Machine 2 (Glossy Photo Frame)'
+          : printerProfile === 'machine_3_heavy'
+          ? 'Machine 3 (Heavy Stock)'
+          : 'OS Spooler';
+      setActionSuccess(`⚡ Auto-Printing all ${activeJob.files.length} documents to ${machineLabel}...`);
       for (let i = 0; i < activeJob.files.length; i++) {
         const file = activeJob.files[i];
-        await triggerAutoPrint(file.url, file.originalName, file.mimeType, autoSettings);
+        await triggerAutoPrint(file.url, file.originalName, file.mimeType, {
+          ...autoSettings,
+          printerMachineProfile: printerProfile,
+          machineLabel,
+        });
       }
       soundEffects.playPaymentSuccess();
       updateJobStatus(activeJob.id, 'printed');
@@ -862,48 +930,168 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
           )}
 
           {/* Print Mode Selector & Pre-Print Controls */}
-          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-3">
+          <div className="p-4 sm:p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-700">
               <div className="flex items-center space-x-2">
                 <Sliders className="w-4 h-4 text-indigo-600 dark:text-yellow-400" />
                 <h4 className="text-xs sm:text-sm font-black text-slate-900 dark:text-slate-100 uppercase tracking-wide">
-                  Print Execution Mode
+                  Print Execution &amp; Printer Routing
                 </h4>
               </div>
 
-              {/* Toggle: Automatic vs Manual */}
-              <div className="inline-flex items-center p-1 rounded-xl bg-slate-200/80 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-black">
+              <div className="flex items-center space-x-2">
+                {/* Multi-Printer Guide Modal Trigger */}
                 <button
                   type="button"
-                  onClick={() => setPrintMode('automatic')}
-                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                    printMode === 'automatic'
-                      ? 'bg-indigo-600 dark:bg-yellow-400 text-white dark:text-slate-950 shadow-xs'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
-                  }`}
+                  onClick={() => setIsPrinterGuideOpen(true)}
+                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-yellow-950/60 hover:bg-indigo-100 dark:hover:bg-yellow-900/60 text-indigo-700 dark:text-yellow-400 text-xs font-bold border border-indigo-200 dark:border-yellow-800/80 transition-colors cursor-pointer"
+                  title="How to manage 2-3 printers and enable 0-click silent printing"
                 >
-                  <Zap className="w-3.5 h-3.5 text-yellow-300 dark:text-slate-950" />
-                  <span>Automatic (Auto Print)</span>
+                  <HelpCircle className="w-3.5 h-3.5" />
+                  <span>Multi-Printer &amp; Kiosk Guide</span>
                 </button>
 
+                {/* Toggle: Automatic vs Manual */}
+                <div className="inline-flex items-center p-1 rounded-xl bg-slate-200/80 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-black">
+                  <button
+                    type="button"
+                    onClick={() => setPrintMode('automatic')}
+                    className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                      printMode === 'automatic'
+                        ? 'bg-indigo-600 dark:bg-yellow-400 text-white dark:text-slate-950 shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                    }`}
+                  >
+                    <Zap className="w-3.5 h-3.5 text-yellow-300 dark:text-slate-950" />
+                    <span>Automatic (Auto Print)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPrintMode('manual')}
+                    className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                      printMode === 'manual'
+                        ? 'bg-indigo-600 dark:bg-yellow-400 text-white dark:text-slate-950 shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                    }`}
+                  >
+                    <Settings2 className="w-3.5 h-3.5" />
+                    <span>Manual (OS Dialog)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Target Printer Machine Profile Selector (Normal Doc Laser vs Glossy Photo vs Heavy Media) */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-black text-slate-800 dark:text-slate-200 flex items-center space-x-1.5">
+                  <Printer className="w-3.5 h-3.5 text-indigo-600 dark:text-yellow-400" />
+                  <span>Target Printer Machine Profile:</span>
+                </span>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Select which physical printer handles this print
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                {/* Machine 1: Document Laser */}
                 <button
                   type="button"
-                  onClick={() => setPrintMode('manual')}
-                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                    printMode === 'manual'
-                      ? 'bg-indigo-600 dark:bg-yellow-400 text-white dark:text-slate-950 shadow-xs'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                  onClick={() => handleSelectPrinterProfile('machine_1_normal')}
+                  className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                    printerProfile === 'machine_1_normal'
+                      ? 'bg-indigo-50/80 dark:bg-indigo-950/60 border-indigo-500 ring-2 ring-indigo-400/40 shadow-xs'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-slate-300'
                   }`}
                 >
-                  <Settings2 className="w-3.5 h-3.5" />
-                  <span>Manual (OS Dialog &amp; Edit)</span>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-black text-slate-900 dark:text-slate-100">
+                      Machine 1: Laser
+                    </span>
+                    <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                      B&amp;W Doc
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    A4 plain paper, Xerox &amp; office files (8mm margins).
+                  </p>
+                </button>
+
+                {/* Machine 2: Glossy Photo & Frame */}
+                <button
+                  type="button"
+                  onClick={() => handleSelectPrinterProfile('machine_2_glossy')}
+                  className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                    printerProfile === 'machine_2_glossy'
+                      ? 'bg-emerald-50/80 dark:bg-emerald-950/60 border-emerald-500 ring-2 ring-emerald-400/40 shadow-xs'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-black text-slate-900 dark:text-slate-100">
+                      Machine 2: Glossy Photo
+                    </span>
+                    <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300">
+                      Photo Frame
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    High-res color, borderless photo frame paper (0mm margin).
+                  </p>
+                </button>
+
+                {/* Machine 3: Heavy Cardstock */}
+                <button
+                  type="button"
+                  onClick={() => handleSelectPrinterProfile('machine_3_heavy')}
+                  className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                    printerProfile === 'machine_3_heavy'
+                      ? 'bg-purple-50/80 dark:bg-purple-950/60 border-purple-500 ring-2 ring-purple-400/40 shadow-xs'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-black text-slate-900 dark:text-slate-100">
+                      Machine 3: Heavy Stock
+                    </span>
+                    <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300">
+                      Thick Media
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Certificates, report covers &amp; cardstock printing.
+                  </p>
+                </button>
+
+                {/* Machine 4: Prompt OS Dialog */}
+                <button
+                  type="button"
+                  onClick={() => handleSelectPrinterProfile('machine_os_dialog')}
+                  className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                    printerProfile === 'machine_os_dialog'
+                      ? 'bg-amber-50/80 dark:bg-amber-950/60 border-amber-500 ring-2 ring-amber-400/40 shadow-xs'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-black text-slate-900 dark:text-slate-100">
+                      System Spooler
+                    </span>
+                    <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300">
+                      Choose in OS
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Always prompt the OS dialog to manually choose destination.
+                  </p>
                 </button>
               </div>
             </div>
 
             {/* When Automatic Mode is Selected */}
             {printMode === 'automatic' ? (
-              <div className="space-y-2.5">
+              <div className="space-y-2.5 pt-2 border-t border-slate-200/80 dark:border-slate-700/80">
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                   <span className="font-extrabold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -1259,6 +1447,12 @@ export const OwnerDeskView: React.FC<OwnerDeskViewProps> = ({
         onClose={() => setIsQrModalOpen(false)}
         shopName={shopSettings?.shopName}
         shopSettings={shopSettings}
+      />
+
+      {/* Multi-Printer Machine Selection & 0-Click Kiosk Guide Modal */}
+      <MultiPrinterGuideModal
+        isOpen={isPrinterGuideOpen}
+        onClose={() => setIsPrinterGuideOpen(false)}
       />
     </div>
   );
